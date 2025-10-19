@@ -21,8 +21,15 @@ export type chat_message = {
     }
   } |
   { 'system' : { 'content' : string } };
+export interface room_config {
+  'id' : string,
+  'name' : string,
+  'description' : string,
+}
 export interface _SERVICE {
-  'chat' : ActorMethod<[Array<chat_message>], string>,
+  'chat' : ActorMethod<[Array<chat_message>, [] | [string]], string>,
+  'chat_default' : ActorMethod<[Array<chat_message>], string>,
+  'get_available_rooms' : ActorMethod<[], Array<room_config>>,
 }
 export declare const idlFactory: IDL.InterfaceFactory;
 export declare const init: (args: { IDL: typeof IDL }) => IDL.Type[];

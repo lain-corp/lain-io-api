@@ -17,6 +17,14 @@ type chat_message = variant {
   system : record { content : text };
 };
 
+type room_config = record {
+  id : text;
+  name : text;
+  description : text;
+};
+
 service: {
-  chat: (vec chat_message) -> (text);
+  chat: (vec chat_message, opt text) -> (text);
+  chat_default: (vec chat_message) -> (text);
+  get_available_rooms: () -> (vec room_config) query;
 }
