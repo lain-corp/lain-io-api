@@ -30,7 +30,47 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'chat_default' : IDL.Func([IDL.Vec(chat_message)], [IDL.Text], []),
+    'chat_with_rag' : IDL.Func(
+        [IDL.Vec(chat_message), IDL.Opt(IDL.Text), IDL.Vec(IDL.Float32)],
+        [IDL.Text],
+        [],
+      ),
     'get_available_rooms' : IDL.Func([], [IDL.Vec(room_config)], ['query']),
+    'get_personality_embeddings' : IDL.Func(
+        [],
+        [
+          IDL.Vec(
+            IDL.Record({
+              'content' : IDL.Text,
+              'trait_type' : IDL.Text,
+              'importance' : IDL.Float32,
+              'embedding' : IDL.Vec(IDL.Float32),
+              'channel' : IDL.Text,
+            })
+          ),
+        ],
+        ['query'],
+      ),
+    'store_personality' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text, IDL.Float32, IDL.Vec(IDL.Float32)],
+        [],
+        [],
+      ),
+    'store_personality_batch' : IDL.Func(
+        [
+          IDL.Vec(
+            IDL.Record({
+              'content' : IDL.Text,
+              'trait_type' : IDL.Text,
+              'importance' : IDL.Float32,
+              'embedding' : IDL.Vec(IDL.Float32),
+              'channel' : IDL.Text,
+            })
+          ),
+        ],
+        [],
+        [],
+      ),
   });
 };
 export const init = ({ IDL }) => { return []; };

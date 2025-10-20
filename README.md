@@ -60,3 +60,14 @@ If you are hosting frontend code somewhere without using DFX, you may need to ma
 - Write your own `createActor` constructor
 
 Vincenzo Iorio Internet Identity : 2859074
+
+Check if Lain Embeddings are present : 
+
+export DFX_WARNING=-mainnet_plaintext_identity && dfx canister --network ic call ai_api_backend get_personality_embeddings --query
+
+Ask Lain for Movies
+
+export DFX_WARNING=-mainnet_plaintext_identity && dfx canister --network ic call ai_api_backend chat '(                           
+  vec { variant { user = record { content = "What kind of movies do you enjoy?" } } }, 
+  opt "#movies"
+)'

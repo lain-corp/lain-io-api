@@ -29,7 +29,41 @@ export interface room_config {
 export interface _SERVICE {
   'chat' : ActorMethod<[Array<chat_message>, [] | [string]], string>,
   'chat_default' : ActorMethod<[Array<chat_message>], string>,
+  'chat_with_rag' : ActorMethod<
+    [Array<chat_message>, [] | [string], Array<number>],
+    string
+  >,
   'get_available_rooms' : ActorMethod<[], Array<room_config>>,
+  'get_personality_embeddings' : ActorMethod<
+    [],
+    Array<
+      {
+        'content' : string,
+        'trait_type' : string,
+        'importance' : number,
+        'embedding' : Array<number>,
+        'channel' : string,
+      }
+    >
+  >,
+  'store_personality' : ActorMethod<
+    [string, string, string, number, Array<number>],
+    undefined
+  >,
+  'store_personality_batch' : ActorMethod<
+    [
+      Array<
+        {
+          'content' : string,
+          'trait_type' : string,
+          'importance' : number,
+          'embedding' : Array<number>,
+          'channel' : string,
+        }
+      >,
+    ],
+    undefined
+  >,
 }
 export declare const idlFactory: IDL.InterfaceFactory;
 export declare const init: (args: { IDL: typeof IDL }) => IDL.Type[];

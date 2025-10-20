@@ -29,6 +29,32 @@ pub fn get_system_prompt_for_room(room_id: &str) -> String {
     }
 }
 
+/// Enhanced system prompt that includes RAG-retrieved personality context
+pub fn get_enhanced_system_prompt_for_room(room_id: &str, personality_context: &[String]) -> String {
+    let base_prompt = get_system_prompt_for_room(room_id);
+    
+    if personality_context.is_empty() {
+        return base_prompt;
+    }
+    
+    let context_section = personality_context
+        .iter()
+        .map(|ctx| format!("- {}", ctx))
+        .collect::<Vec<_>>()
+        .join("\n");
+    
+    format!(
+        r#"{base_prompt}
+
+Based on your personality and past experiences:
+{context_section}
+
+Use this context to inform your response while maintaining your character as Lain."#,
+        base_prompt = base_prompt,
+        context_section = context_section
+    )
+}
+
 /// Get all available room configurations
 pub fn get_all_room_configs() -> Vec<RoomConfig> {
     vec![

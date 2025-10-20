@@ -23,8 +23,22 @@ type room_config = record {
   description : text;
 };
 
+type personality_embedding = record {
+  text: text;
+  embedding: vec float32;
+  channel_id: text;
+  category: text;
+  importance: float32;
+  created_at: nat64;
+};
+
 service: {
   chat: (vec chat_message, opt text) -> (text);
   chat_default: (vec chat_message) -> (text);
+  chat_with_rag: (vec chat_message, opt text, vec float32) -> (text);
   get_available_rooms: () -> (vec room_config) query;
+  store_personality: (personality_embedding) -> (text);
+  store_personality_batch: (vec personality_embedding) -> (text);
+  get_personality_embeddings: () -> (vec personality_embedding) query;
+  search_personality: (text, vec float32) -> (vec text) query;
 }

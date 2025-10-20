@@ -26,5 +26,21 @@ type room_config = record {
 service: {
   chat: (vec chat_message, opt text) -> (text);
   chat_default: (vec chat_message) -> (text);
+  chat_with_rag: (vec chat_message, opt text, vec float32) -> (text);
   get_available_rooms: () -> (vec room_config) query;
+  store_personality: (text, text, text, float32, vec float32) -> ();
+  store_personality_batch: (vec record { 
+    channel: text; 
+    content: text; 
+    trait_type: text; 
+    importance: float32; 
+    embedding: vec float32 
+  }) -> ();
+  get_personality_embeddings: () -> (vec record { 
+    channel: text; 
+    content: text; 
+    trait_type: text; 
+    importance: float32; 
+    embedding: vec float32 
+  }) query;
 }
