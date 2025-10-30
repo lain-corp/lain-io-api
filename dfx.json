@@ -10,6 +10,17 @@
           "name": "candid:service"
         }
       ]
+    },
+    "database_backend": {
+      "candid": "src/database_backend/database_backend.did",
+      "package": "database_backend",
+      "type": "rust",
+      "log_visibility": "public",
+      "metadata": [
+        {
+          "name": "candid:service"
+        }
+      ]
     }
   },
   "defaults": {

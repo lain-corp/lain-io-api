@@ -1,5 +1,8 @@
 {
   "ai_api_backend": {
     "ic": "zbpu3-baaaa-aaaad-qhpha-cai"
+  },
+  "database_backend": {
+    "ic": "y6rto-eyaaa-aaaad-qhqga-cai"
   }
 }

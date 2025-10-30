@@ -1,0 +1,113 @@
+type ApiResponse = record {
+    success : bool;
+    data : opt record {};
+    error : opt text;
+};
+
+type ApiResponseUserProfile = record {
+    success : bool;
+    data : opt UserProfile;
+    error : opt text;
+};
+
+type ApiResponseVecUserProfile = record {
+    success : bool;
+    data : opt vec UserProfile;
+    error : opt text;
+};
+
+type ApiResponseVecFriend = record {
+    success : bool;
+    data : opt vec Friend;
+    error : opt text;
+};
+
+type ApiResponseFriendRequest = record {
+    success : bool;
+    data : opt FriendRequest;
+    error : opt text;
+};
+
+type ApiResponseVecFriendRequest = record {
+    success : bool;
+    data : opt vec FriendRequest;
+    error : opt text;
+};
+
+type ApiResponseVecBlockedUser = record {
+    success : bool;
+    data : opt vec BlockedUser;
+    error : opt text;
+};
+
+type ApiResponseBool = record {
+    success : bool;
+    data : opt bool;
+    error : opt text;
+};
+
+type UserProfile = record {
+    "principal" : principal;
+    display_name : text;
+    avatar_base64 : opt text;
+    bio : opt text;
+    created_at : nat64;
+};
+
+type Friend = record {
+    "principal" : principal;
+    display_name : text;
+    avatar_base64 : opt text;
+    added_at : nat64;
+};
+
+type FriendRequest = record {
+    id : text;
+    from_principal : principal;
+    from_display_name : text;
+    from_avatar_base64 : opt text;
+    to_principal : principal;
+    to_display_name : text;
+    status : FriendRequestStatus;
+    created_at : nat64;
+};
+
+type FriendRequestStatus = variant {
+    Pending;
+    Accepted;
+    Rejected;
+};
+
+type BlockedUser = record {
+    "principal" : principal;
+    display_name : text;
+    blocked_at : nat64;
+};
+
+service : {
+    // User Registry
+    "register_user" : (text, opt text, opt text) -> (ApiResponseUserProfile);
+    "search_users" : (text) -> (ApiResponseVecUserProfile) query;
+    "get_user_by_principal" : (principal) -> (ApiResponseUserProfile) query;
+    "get_all_users" : () -> (ApiResponseVecUserProfile) query;
+    "update_profile" : (opt text, opt text, opt text) -> (ApiResponse);
+    
+    // Friends Management
+    "add_friend" : (principal) -> (ApiResponse);
+    "remove_friend" : (principal) -> (ApiResponse);
+    "get_friends" : () -> (ApiResponseVecFriend) query;
+    "is_friend" : (principal) -> (ApiResponseBool) query;
+    
+    // Friend Requests
+    "send_friend_request" : (principal) -> (ApiResponseFriendRequest);
+    "accept_friend_request" : (text) -> (ApiResponse);
+    "reject_friend_request" : (text) -> (ApiResponse);
+    "get_friend_requests" : () -> (ApiResponseVecFriendRequest) query;
+    "get_sent_requests" : () -> (ApiResponseVecFriendRequest) query;
+    
+    // Blocking
+    "block_user" : (principal) -> (ApiResponse);
+    "unblock_user" : (principal) -> (ApiResponse);
+    "get_blocked_users" : () -> (ApiResponseVecBlockedUser) query;
+    "is_blocked" : (principal) -> (ApiResponseBool) query;
+}

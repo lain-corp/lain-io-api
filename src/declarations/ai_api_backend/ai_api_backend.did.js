@@ -23,6 +23,14 @@ export const idlFactory = ({ IDL }) => {
     'name' : IDL.Text,
     'description' : IDL.Text,
   });
+  const personality_embedding = IDL.Record({
+    'channel_id' : IDL.Text,
+    'text' : IDL.Text,
+    'importance' : IDL.Float32,
+    'created_at' : IDL.Nat64,
+    'category' : IDL.Text,
+    'embedding' : IDL.Vec(IDL.Float32),
+  });
   return IDL.Service({
     'chat' : IDL.Func(
         [IDL.Vec(chat_message), IDL.Opt(IDL.Text)],
@@ -38,37 +46,18 @@ export const idlFactory = ({ IDL }) => {
     'get_available_rooms' : IDL.Func([], [IDL.Vec(room_config)], ['query']),
     'get_personality_embeddings' : IDL.Func(
         [],
-        [
-          IDL.Vec(
-            IDL.Record({
-              'content' : IDL.Text,
-              'trait_type' : IDL.Text,
-              'importance' : IDL.Float32,
-              'embedding' : IDL.Vec(IDL.Float32),
-              'channel' : IDL.Text,
-            })
-          ),
-        ],
+        [IDL.Vec(personality_embedding)],
         ['query'],
       ),
-    'store_personality' : IDL.Func(
-        [IDL.Text, IDL.Text, IDL.Text, IDL.Float32, IDL.Vec(IDL.Float32)],
-        [],
-        [],
+    'search_personality' : IDL.Func(
+        [IDL.Text, IDL.Vec(IDL.Float32)],
+        [IDL.Vec(IDL.Text)],
+        ['query'],
       ),
+    'store_personality' : IDL.Func([personality_embedding], [IDL.Text], []),
     'store_personality_batch' : IDL.Func(
-        [
-          IDL.Vec(
-            IDL.Record({
-              'content' : IDL.Text,
-              'trait_type' : IDL.Text,
-              'importance' : IDL.Float32,
-              'embedding' : IDL.Vec(IDL.Float32),
-              'channel' : IDL.Text,
-            })
-          ),
-        ],
-        [],
+        [IDL.Vec(personality_embedding)],
+        [IDL.Text],
         [],
       ),
   });

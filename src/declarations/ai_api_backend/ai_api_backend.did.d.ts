@@ -21,6 +21,14 @@ export type chat_message = {
     }
   } |
   { 'system' : { 'content' : string } };
+export interface personality_embedding {
+  'channel_id' : string,
+  'text' : string,
+  'importance' : number,
+  'created_at' : bigint,
+  'category' : string,
+  'embedding' : Array<number>,
+}
 export interface room_config {
   'id' : string,
   'name' : string,
@@ -34,35 +42,12 @@ export interface _SERVICE {
     string
   >,
   'get_available_rooms' : ActorMethod<[], Array<room_config>>,
-  'get_personality_embeddings' : ActorMethod<
-    [],
-    Array<
-      {
-        'content' : string,
-        'trait_type' : string,
-        'importance' : number,
-        'embedding' : Array<number>,
-        'channel' : string,
-      }
-    >
-  >,
-  'store_personality' : ActorMethod<
-    [string, string, string, number, Array<number>],
-    undefined
-  >,
+  'get_personality_embeddings' : ActorMethod<[], Array<personality_embedding>>,
+  'search_personality' : ActorMethod<[string, Array<number>], Array<string>>,
+  'store_personality' : ActorMethod<[personality_embedding], string>,
   'store_personality_batch' : ActorMethod<
-    [
-      Array<
-        {
-          'content' : string,
-          'trait_type' : string,
-          'importance' : number,
-          'embedding' : Array<number>,
-          'channel' : string,
-        }
-      >,
-    ],
-    undefined
+    [Array<personality_embedding>],
+    string
   >,
 }
 export declare const idlFactory: IDL.InterfaceFactory;
