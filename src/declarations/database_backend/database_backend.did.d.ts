@@ -60,7 +60,6 @@ export interface FriendRequest {
   'to_display_name' : string,
   'created_at' : bigint,
   'from_principal' : Principal,
-  'from_avatar_base64' : [] | [string],
   'from_display_name' : string,
 }
 export type FriendRequestStatus = { 'Rejected' : null } |
@@ -77,6 +76,7 @@ export interface _SERVICE {
   'accept_friend_request' : ActorMethod<[string], ApiResponse>,
   'add_friend' : ActorMethod<[Principal], ApiResponse>,
   'block_user' : ActorMethod<[Principal], ApiResponse>,
+  'clear_all_friend_requests' : ActorMethod<[], ApiResponse>,
   'get_all_users' : ActorMethod<[], ApiResponseVecUserProfile>,
   'get_blocked_users' : ActorMethod<[], ApiResponseVecBlockedUser>,
   'get_friend_requests' : ActorMethod<[], ApiResponseVecFriendRequest>,

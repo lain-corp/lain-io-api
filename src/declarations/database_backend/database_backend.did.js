@@ -38,7 +38,6 @@ export const idlFactory = ({ IDL }) => {
     'to_display_name' : IDL.Text,
     'created_at' : IDL.Nat64,
     'from_principal' : IDL.Principal,
-    'from_avatar_base64' : IDL.Opt(IDL.Text),
     'from_display_name' : IDL.Text,
   });
   const ApiResponseVecFriendRequest = IDL.Record({
@@ -76,6 +75,7 @@ export const idlFactory = ({ IDL }) => {
     'accept_friend_request' : IDL.Func([IDL.Text], [ApiResponse], []),
     'add_friend' : IDL.Func([IDL.Principal], [ApiResponse], []),
     'block_user' : IDL.Func([IDL.Principal], [ApiResponse], []),
+    'clear_all_friend_requests' : IDL.Func([], [ApiResponse], []),
     'get_all_users' : IDL.Func([], [ApiResponseVecUserProfile], ['query']),
     'get_blocked_users' : IDL.Func([], [ApiResponseVecBlockedUser], ['query']),
     'get_friend_requests' : IDL.Func(

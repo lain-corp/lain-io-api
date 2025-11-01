@@ -65,7 +65,6 @@ type FriendRequest = record {
     id : text;
     from_principal : principal;
     from_display_name : text;
-    from_avatar_base64 : opt text;
     to_principal : principal;
     to_display_name : text;
     status : FriendRequestStatus;
@@ -110,4 +109,8 @@ service : {
     "unblock_user" : (principal) -> (ApiResponse);
     "get_blocked_users" : () -> (ApiResponseVecBlockedUser) query;
     "is_blocked" : (principal) -> (ApiResponseBool) query;
+    
+    // Admin
+    "debug_get_all_friend_requests" : () -> (ApiResponseVecFriendRequest) query;
+    "clear_all_friend_requests" : () -> (ApiResponse);
 }

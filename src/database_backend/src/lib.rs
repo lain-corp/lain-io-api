@@ -3,7 +3,7 @@ mod types;
 
 use candid::Principal;
 use ic_cdk::{caller, query, update};
-use types::{ApiResponse, Friend, FriendRequest, FriendRequestStatus, UserProfile, BlockedUser};
+use types::{ApiResponse, Friend, FriendRequest, FriendRequestStatus, UserProfile, UserSearchResult, BlockedUser, ChatMessage, UserDataSync, SyncResponse};
 
 // ============ USER REGISTRY METHODS ============
 
@@ -36,7 +36,7 @@ fn register_user(display_name: String, avatar_base64: Option<String>, bio: Optio
 }
 
 #[query]
-fn search_users(query: String) -> ApiResponse<Vec<UserProfile>> {
+fn search_users(query: String) -> ApiResponse<Vec<UserSearchResult>> {
     let query_lower = query.to_lowercase();
     
     let results = storage::USER_PROFILES.with(|profiles| {
@@ -45,7 +45,12 @@ fn search_users(query: String) -> ApiResponse<Vec<UserProfile>> {
             .filter(|(_, profile)| {
                 profile.display_name.to_lowercase().contains(&query_lower)
             })
-            .map(|(_, profile)| profile)
+            .take(50) // Limit to 50 results to avoid exceeding ICP's 3.1MB response limit
+            .map(|(_, profile)| UserSearchResult {
+                principal: profile.principal,
+                display_name: profile.display_name.clone(),
+                created_at: profile.created_at,
+            })
             .collect::<Vec<_>>()
     });
     
@@ -100,6 +105,27 @@ fn update_profile(
     });
     
     ApiResponse::success(())
+}
+
+#[query]
+fn is_display_name_taken(display_name: String) -> ApiResponse<bool> {
+    let display_name_lower = display_name.to_lowercase();
+    let caller_principal = caller();
+    
+    let is_taken = storage::USER_PROFILES.with(|profiles| {
+        profiles.borrow()
+            .iter()
+            .any(|(principal, profile)| {
+                // Allow the current user to keep their own display name
+                if principal == caller_principal {
+                    return false;
+                }
+                // Check if any other user has this display name (case-insensitive)
+                profile.display_name.to_lowercase() == display_name_lower
+            })
+    });
+    
+    ApiResponse::success(is_taken)
 }
 
 // ============ FRIENDS MANAGEMENT METHODS ============
@@ -239,17 +265,30 @@ fn send_friend_request(to_principal: Principal) -> ApiResponse<FriendRequest> {
         return ApiResponse::error("Cannot send friend request: you are blocked".to_string());
     }
     
-    // Check for existing pending request
-    let existing_request = storage::FRIEND_REQUESTS.with(|requests| {
-        requests.borrow().iter().find(|(_, req)| {
+    // Check for existing pending request in both directions
+    let (existing_request, reverse_request) = storage::FRIEND_REQUESTS.with(|requests| {
+        let borrowed = requests.borrow();
+        let existing = borrowed.iter().find(|(_, req)| {
             req.from_principal == from_principal && 
             req.to_principal == to_principal && 
             req.status == FriendRequestStatus::Pending
-        }).map(|(_, req)| req)
+        }).map(|(_, req)| req);
+        
+        let reverse = borrowed.iter().find(|(_, req)| {
+            req.from_principal == to_principal && 
+            req.to_principal == from_principal && 
+            req.status == FriendRequestStatus::Pending
+        }).map(|(_, req)| req);
+        
+        (existing, reverse)
     });
     
     if existing_request.is_some() {
         return ApiResponse::error("Friend request already sent".to_string());
+    }
+    
+    if reverse_request.is_some() {
+        return ApiResponse::error("This user has already sent you a friend request. Check your pending requests.".to_string());
     }
     
     // Create request
@@ -258,7 +297,6 @@ fn send_friend_request(to_principal: Principal) -> ApiResponse<FriendRequest> {
         id: request_id.clone(),
         from_principal,
         from_display_name: from_profile.display_name,
-        from_avatar_base64: from_profile.avatar_base64,
         to_principal,
         to_display_name: to_profile.display_name,
         status: FriendRequestStatus::Pending,
@@ -447,4 +485,202 @@ fn is_blocked(principal: Principal) -> ApiResponse<bool> {
     });
     
     ApiResponse::success(is_blocked)
+}
+
+// ============ DATA SYNC METHODS ============
+
+#[update]
+fn sync_user_data(chat_messages: Vec<ChatMessage>) -> ApiResponse<SyncResponse> {
+    let caller_principal = caller();
+    let now = ic_cdk::api::time();
+    
+    // Debug: Log incoming messages
+    ic_cdk::println!("=== SYNC DEBUG START ===");
+    ic_cdk::println!("Received {} messages for principal: {}", chat_messages.len(), caller_principal);
+    for (i, msg) in chat_messages.iter().enumerate() {
+        ic_cdk::println!("Message {}: id={}, text={}, sender={}, timestamp={}, channel={:?}", 
+            i, msg.id, msg.text, msg.sender, msg.timestamp, msg.channel);
+    }
+    
+    // Create or update user data sync
+    let user_data = UserDataSync {
+        chat_messages: chat_messages.clone(),
+        profile: storage::USER_PROFILES.with(|profiles| {
+            profiles.borrow().get(&caller_principal)
+        }),
+        last_sync: now,
+    };
+    
+    let messages_count = user_data.chat_messages.len() as u32;
+    ic_cdk::println!("Created UserDataSync with {} messages", messages_count);
+    
+    // Store the sync data
+    storage::USER_DATA_SYNC.with(|sync_data| {
+        sync_data.borrow_mut().insert(caller_principal, user_data);
+    });
+    
+    // Debug: Verify storage
+    let stored_data = storage::USER_DATA_SYNC.with(|sync_data| {
+        sync_data.borrow().get(&caller_principal)
+    });
+    
+    match stored_data {
+        Some(data) => {
+            ic_cdk::println!("Stored data verification: {} messages", data.chat_messages.len());
+            for (i, msg) in data.chat_messages.iter().enumerate() {
+                ic_cdk::println!("Stored message {}: id={}, text={}, sender={}", 
+                    i, msg.id, msg.text, msg.sender);
+            }
+        },
+        None => ic_cdk::println!("ERROR: No data found after storage!"),
+    }
+    ic_cdk::println!("=== SYNC DEBUG END ===");
+    
+    let response = SyncResponse {
+        success: true,
+        messages_synced: messages_count,
+        last_sync: now,
+    };
+    
+    ApiResponse::success(response)
+}
+
+#[query]
+fn get_user_data_sync() -> ApiResponse<UserDataSync> {
+    let caller_principal = caller();
+    
+    match storage::USER_DATA_SYNC.with(|sync_data| {
+        sync_data.borrow().get(&caller_principal)
+    }) {
+        Some(data) => ApiResponse::success(data),
+        None => ApiResponse::error("No sync data found for user".to_string()),
+    }
+}
+
+#[query]
+fn get_user_chat_messages(channel: Option<String>) -> ApiResponse<Vec<ChatMessage>> {
+    let caller_principal = caller();
+    
+    match storage::USER_DATA_SYNC.with(|sync_data| {
+        sync_data.borrow().get(&caller_principal)
+    }) {
+        Some(data) => {
+            let filtered_messages: Vec<ChatMessage> = if let Some(channel_filter) = channel {
+                data.chat_messages.into_iter()
+                    .filter(|msg| msg.channel.as_ref() == Some(&channel_filter))
+                    .collect()
+            } else {
+                data.chat_messages
+            };
+            ApiResponse::success(filtered_messages)
+        },
+        None => ApiResponse::success(vec![]),
+    }
+}
+
+#[query]
+fn debug_get_user_chat_messages(user_principal: Principal, channel: Option<String>) -> ApiResponse<Vec<ChatMessage>> {
+    ic_cdk::println!("Debug: Getting messages for principal: {} with channel: {:?}", user_principal.to_text(), channel);
+    
+    match storage::USER_DATA_SYNC.with(|sync_data| {
+        sync_data.borrow().get(&user_principal)
+    }) {
+        Some(data) => {
+            ic_cdk::println!("Debug: Found sync data with {} messages", data.chat_messages.len());
+            
+            let filtered_messages: Vec<ChatMessage> = if let Some(channel_filter) = channel {
+                ic_cdk::println!("Debug: Filtering by channel: {}", channel_filter);
+                let filtered: Vec<ChatMessage> = data.chat_messages.into_iter()
+                    .filter(|msg| {
+                        let matches = msg.channel.as_ref() == Some(&channel_filter);
+                        ic_cdk::println!("Debug: Message {} channel {:?} matches {}: {}", msg.id, msg.channel, channel_filter, matches);
+                        matches
+                    })
+                    .collect();
+                ic_cdk::println!("Debug: After filtering: {} messages", filtered.len());
+                filtered
+            } else {
+                ic_cdk::println!("Debug: No channel filter, returning all {} messages", data.chat_messages.len());
+                data.chat_messages
+            };
+            
+            // Log first few messages for debugging
+            for (i, msg) in filtered_messages.iter().take(3).enumerate() {
+                ic_cdk::println!("Debug: Message {}: id={}, text={}, sender={}, channel={:?}", 
+                    i, msg.id, msg.text.chars().take(50).collect::<String>(), msg.sender, msg.channel);
+            }
+            
+            ApiResponse::success(filtered_messages)
+        },
+        None => {
+            ic_cdk::println!("Debug: No sync data found for principal: {}", user_principal.to_text());
+            ApiResponse::success(vec![])
+        }
+    }
+}
+
+// ============ ADMIN METHODS ============
+
+#[query]
+fn debug_get_all_friend_requests() -> ApiResponse<Vec<FriendRequest>> {
+    // Get ALL friend requests regardless of status or user (for debugging)
+    let all_requests = storage::FRIEND_REQUESTS.with(|requests| {
+        requests.borrow()
+            .iter()
+            .map(|(_, req)| req)
+            .collect()
+    });
+    
+    ApiResponse::success(all_requests)
+}
+
+#[update]
+fn clear_all_friend_requests() -> ApiResponse<()> {
+    storage::FRIEND_REQUESTS.with(|requests| {
+        requests.borrow_mut().clear_new();
+    });
+    
+    ApiResponse::success(())
+}
+
+#[update]
+fn clear_all_data() -> ApiResponse<()> {
+    // Clear all user profiles
+    storage::USER_PROFILES.with(|profiles| {
+        profiles.borrow_mut().clear_new();
+    });
+    
+    // Clear all friends
+    storage::FRIENDS.with(|friends| {
+        friends.borrow_mut().clear_new();
+    });
+    
+    // Clear all friend requests
+    storage::FRIEND_REQUESTS.with(|requests| {
+        requests.borrow_mut().clear_new();
+    });
+    
+    // Clear all blocked users
+    storage::BLOCKED_USERS.with(|blocked| {
+        blocked.borrow_mut().clear_new();
+    });
+    
+    // Clear all user data sync
+    storage::USER_DATA_SYNC.with(|sync_data| {
+        sync_data.borrow_mut().clear_new();
+    });
+    
+    ApiResponse::success(())
+}
+
+#[query]
+fn debug_get_all_sync_data() -> ApiResponse<Vec<(String, UserDataSync)>> {
+    let all_sync_data = storage::USER_DATA_SYNC.with(|sync_data| {
+        sync_data.borrow()
+            .iter()
+            .map(|(principal, data)| (principal.to_text(), data))
+            .collect()
+    });
+    
+    ApiResponse::success(all_sync_data)
 }

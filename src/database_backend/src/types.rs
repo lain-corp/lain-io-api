@@ -3,6 +3,14 @@ use ic_stable_structures::{storable::Bound, Storable};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
+// Lightweight search result (excludes large fields like avatar_base64)
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct UserSearchResult {
+    pub principal: Principal,
+    pub display_name: String,
+    pub created_at: u64,
+}
+
 // UserProfile matches TypeScript interface
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct UserProfile {
@@ -13,7 +21,45 @@ pub struct UserProfile {
     pub created_at: u64,
 }
 
+// Chat message for sync
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct ChatMessage {
+    pub id: String,
+    pub text: String,
+    pub sender: String, // 'me' or 'bot'
+    pub timestamp: u64,
+    pub channel: Option<String>,
+}
+
+// User data sync payload
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct UserDataSync {
+    pub chat_messages: Vec<ChatMessage>,
+    pub profile: Option<UserProfile>,
+    pub last_sync: u64,
+}
+
+// Sync response
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct SyncResponse {
+    pub success: bool,
+    pub messages_synced: u32,
+    pub last_sync: u64,
+}
+
 impl Storable for UserProfile {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(Encode!(self).unwrap())
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        Decode!(bytes.as_ref(), Self).unwrap()
+    }
+
+    const BOUND: Bound = Bound::Unbounded;
+}
+
+impl Storable for UserDataSync {
     fn to_bytes(&self) -> Cow<[u8]> {
         Cow::Owned(Encode!(self).unwrap())
     }
@@ -52,7 +98,6 @@ pub struct FriendRequest {
     pub id: String,
     pub from_principal: Principal,
     pub from_display_name: String,
-    pub from_avatar_base64: Option<String>,
     pub to_principal: Principal,
     pub to_display_name: String,
     pub status: FriendRequestStatus,
