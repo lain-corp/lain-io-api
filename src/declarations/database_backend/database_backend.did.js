@@ -4,6 +4,25 @@ export const idlFactory = ({ IDL }) => {
     'error' : IDL.Opt(IDL.Text),
     'success' : IDL.Bool,
   });
+  const FriendRequestStatus = IDL.Variant({
+    'Rejected' : IDL.Null,
+    'Accepted' : IDL.Null,
+    'Pending' : IDL.Null,
+  });
+  const FriendRequest = IDL.Record({
+    'id' : IDL.Text,
+    'status' : FriendRequestStatus,
+    'to_principal' : IDL.Principal,
+    'to_display_name' : IDL.Text,
+    'created_at' : IDL.Nat64,
+    'from_principal' : IDL.Principal,
+    'from_display_name' : IDL.Text,
+  });
+  const ApiResponseVecFriendRequest = IDL.Record({
+    'data' : IDL.Opt(IDL.Vec(FriendRequest)),
+    'error' : IDL.Opt(IDL.Text),
+    'success' : IDL.Bool,
+  });
   const UserProfile = IDL.Record({
     'bio' : IDL.Opt(IDL.Text),
     'principal' : IDL.Principal,
@@ -23,25 +42,6 @@ export const idlFactory = ({ IDL }) => {
   });
   const ApiResponseVecBlockedUser = IDL.Record({
     'data' : IDL.Opt(IDL.Vec(BlockedUser)),
-    'error' : IDL.Opt(IDL.Text),
-    'success' : IDL.Bool,
-  });
-  const FriendRequestStatus = IDL.Variant({
-    'Rejected' : IDL.Null,
-    'Accepted' : IDL.Null,
-    'Pending' : IDL.Null,
-  });
-  const FriendRequest = IDL.Record({
-    'id' : IDL.Text,
-    'status' : FriendRequestStatus,
-    'to_principal' : IDL.Principal,
-    'to_display_name' : IDL.Text,
-    'created_at' : IDL.Nat64,
-    'from_principal' : IDL.Principal,
-    'from_display_name' : IDL.Text,
-  });
-  const ApiResponseVecFriendRequest = IDL.Record({
-    'data' : IDL.Opt(IDL.Vec(FriendRequest)),
     'error' : IDL.Opt(IDL.Text),
     'success' : IDL.Bool,
   });
@@ -75,7 +75,13 @@ export const idlFactory = ({ IDL }) => {
     'accept_friend_request' : IDL.Func([IDL.Text], [ApiResponse], []),
     'add_friend' : IDL.Func([IDL.Principal], [ApiResponse], []),
     'block_user' : IDL.Func([IDL.Principal], [ApiResponse], []),
+  'admin_clear_database' : IDL.Func([], [ApiResponse], []),
     'clear_all_friend_requests' : IDL.Func([], [ApiResponse], []),
+    'debug_get_all_friend_requests' : IDL.Func(
+        [],
+        [ApiResponseVecFriendRequest],
+        ['query'],
+      ),
     'get_all_users' : IDL.Func([], [ApiResponseVecUserProfile], ['query']),
     'get_blocked_users' : IDL.Func([], [ApiResponseVecBlockedUser], ['query']),
     'get_friend_requests' : IDL.Func(
@@ -95,6 +101,11 @@ export const idlFactory = ({ IDL }) => {
         ['query'],
       ),
     'is_blocked' : IDL.Func([IDL.Principal], [ApiResponseBool], ['query']),
+    'is_display_name_taken' : IDL.Func(
+        [IDL.Text],
+        [ApiResponseBool],
+        ['query'],
+      ),
     'is_friend' : IDL.Func([IDL.Principal], [ApiResponseBool], ['query']),
     'register_user' : IDL.Func(
         [IDL.Text, IDL.Opt(IDL.Text), IDL.Opt(IDL.Text)],

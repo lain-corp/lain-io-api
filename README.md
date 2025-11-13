@@ -71,3 +71,6 @@ export DFX_WARNING=-mainnet_plaintext_identity && dfx canister --network ic call
   vec { variant { user = record { content = "What kind of movies do you enjoy?" } } }, 
   opt "#movies"
 )'
+
+
+dfx canister --network ic call database_backend admin_clear_database '()'

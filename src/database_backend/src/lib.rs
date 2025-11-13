@@ -20,6 +20,20 @@ fn register_user(display_name: String, avatar_base64: Option<String>, bio: Optio
         return ApiResponse::error("User already registered".to_string());
     }
     
+    // Check if display name is already taken by another user
+    let display_name_lower = display_name.to_lowercase();
+    let is_taken = storage::USER_PROFILES.with(|profiles| {
+        profiles.borrow()
+            .iter()
+            .any(|(_, profile)| {
+                profile.display_name.to_lowercase() == display_name_lower
+            })
+    });
+    
+    if is_taken {
+        return ApiResponse::error(format!("Display name '{}' is already taken", display_name));
+    }
+    
     let profile = UserProfile {
         principal,
         display_name,
@@ -90,6 +104,25 @@ fn update_profile(
     
     // Update fields if provided
     if let Some(name) = display_name {
+        // Check if the new display name is already taken by another user
+        let display_name_lower = name.to_lowercase();
+        let is_taken = storage::USER_PROFILES.with(|profiles| {
+            profiles.borrow()
+                .iter()
+                .any(|(principal, profile)| {
+                    // Allow the current user to keep their own display name
+                    if principal == caller_principal {
+                        return false;
+                    }
+                    // Check if any other user has this display name (case-insensitive)
+                    profile.display_name.to_lowercase() == display_name_lower
+                })
+        });
+        
+        if is_taken {
+            return ApiResponse::error(format!("Display name '{}' is already taken", name));
+        }
+        
         user.display_name = name;
     }
     if let Some(avatar) = avatar_base64 {
@@ -636,6 +669,10 @@ fn debug_get_all_friend_requests() -> ApiResponse<Vec<FriendRequest>> {
 
 #[update]
 fn clear_all_friend_requests() -> ApiResponse<()> {
+    if !ic_cdk::api::is_controller(&caller()) {
+        return ApiResponse::error("Unauthorized: caller is not a controller".to_string());
+    }
+
     storage::FRIEND_REQUESTS.with(|requests| {
         requests.borrow_mut().clear_new();
     });
@@ -644,7 +681,11 @@ fn clear_all_friend_requests() -> ApiResponse<()> {
 }
 
 #[update]
-fn clear_all_data() -> ApiResponse<()> {
+fn admin_clear_database() -> ApiResponse<()> {
+    if !ic_cdk::api::is_controller(&caller()) {
+        return ApiResponse::error("Unauthorized: caller is not a controller".to_string());
+    }
+
     // Clear all user profiles
     storage::USER_PROFILES.with(|profiles| {
         profiles.borrow_mut().clear_new();

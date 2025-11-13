@@ -76,7 +76,12 @@ export interface _SERVICE {
   'accept_friend_request' : ActorMethod<[string], ApiResponse>,
   'add_friend' : ActorMethod<[Principal], ApiResponse>,
   'block_user' : ActorMethod<[Principal], ApiResponse>,
+  'admin_clear_database' : ActorMethod<[], ApiResponse>,
   'clear_all_friend_requests' : ActorMethod<[], ApiResponse>,
+  'debug_get_all_friend_requests' : ActorMethod<
+    [],
+    ApiResponseVecFriendRequest
+  >,
   'get_all_users' : ActorMethod<[], ApiResponseVecUserProfile>,
   'get_blocked_users' : ActorMethod<[], ApiResponseVecBlockedUser>,
   'get_friend_requests' : ActorMethod<[], ApiResponseVecFriendRequest>,
@@ -84,6 +89,7 @@ export interface _SERVICE {
   'get_sent_requests' : ActorMethod<[], ApiResponseVecFriendRequest>,
   'get_user_by_principal' : ActorMethod<[Principal], ApiResponseUserProfile>,
   'is_blocked' : ActorMethod<[Principal], ApiResponseBool>,
+  'is_display_name_taken' : ActorMethod<[string], ApiResponseBool>,
   'is_friend' : ActorMethod<[Principal], ApiResponseBool>,
   'register_user' : ActorMethod<
     [string, [] | [string], [] | [string]],

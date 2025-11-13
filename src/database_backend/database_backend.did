@@ -90,6 +90,7 @@ service : {
     "get_user_by_principal" : (principal) -> (ApiResponseUserProfile) query;
     "get_all_users" : () -> (ApiResponseVecUserProfile) query;
     "update_profile" : (opt text, opt text, opt text) -> (ApiResponse);
+    "is_display_name_taken" : (text) -> (ApiResponseBool) query;
     
     // Friends Management
     "add_friend" : (principal) -> (ApiResponse);
@@ -113,4 +114,5 @@ service : {
     // Admin
     "debug_get_all_friend_requests" : () -> (ApiResponseVecFriendRequest) query;
     "clear_all_friend_requests" : () -> (ApiResponse);
+    "admin_clear_database" : () -> (ApiResponse);
 }
