@@ -114,4 +114,5 @@ service : {
     // Admin
     "debug_get_all_friend_requests" : () -> (ApiResponseVecFriendRequest) query;
     "clear_all_friend_requests" : () -> (ApiResponse);
+    "admin_clear_database" : () -> (ApiResponse);
 }

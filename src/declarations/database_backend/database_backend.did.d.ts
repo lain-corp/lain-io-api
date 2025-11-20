@@ -75,8 +75,8 @@ export interface UserProfile {
 export interface _SERVICE {
   'accept_friend_request' : ActorMethod<[string], ApiResponse>,
   'add_friend' : ActorMethod<[Principal], ApiResponse>,
-  'block_user' : ActorMethod<[Principal], ApiResponse>,
   'admin_clear_database' : ActorMethod<[], ApiResponse>,
+  'block_user' : ActorMethod<[Principal], ApiResponse>,
   'clear_all_friend_requests' : ActorMethod<[], ApiResponse>,
   'debug_get_all_friend_requests' : ActorMethod<
     [],

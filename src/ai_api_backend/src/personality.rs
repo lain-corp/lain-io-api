@@ -20,10 +20,23 @@ pub struct UserMemory {
     pub created_at: u64,        // When this was learned
 }
 
+#[derive(CandidType, Deserialize, Debug, Clone)]
+pub struct ConversationEmbedding {
+    pub user_id: String,        // Principal ID of the user
+    pub channel_id: String,     // Channel where conversation happened
+    pub conversation_text: String,  // The 10-message conversation chunk
+    pub embedding: Vec<f32>,    // Vector representation of the conversation
+    pub message_count: u32,     // Number of messages in this chunk
+    pub chunk_index: u32,       // Sequential chunk number (0, 1, 2, ...)
+    pub created_at: u64,        // When this chunk was stored
+    pub summary: String,        // Brief summary of the conversation chunk
+}
+
 // Storage for personality embeddings (stable memory)
 thread_local! {
     static PERSONALITY_EMBEDDINGS: std::cell::RefCell<Vec<PersonalityEmbedding>> = std::cell::RefCell::new(Vec::new());
     static USER_MEMORIES: std::cell::RefCell<Vec<UserMemory>> = std::cell::RefCell::new(Vec::new());
+    static CONVERSATION_EMBEDDINGS: std::cell::RefCell<Vec<ConversationEmbedding>> = std::cell::RefCell::new(Vec::new());
 }
 
 /// Store a personality embedding (called from frontend)
@@ -154,4 +167,143 @@ pub fn get_enhanced_context(
     };
     
     (personality_context, user_context)
+}
+
+// === CONVERSATION EMBEDDING FUNCTIONS ===
+
+/// Store a conversation embedding chunk
+pub fn store_conversation_embedding(conversation: ConversationEmbedding) {
+    CONVERSATION_EMBEDDINGS.with(|conversations| {
+        conversations.borrow_mut().push(conversation);
+    });
+}
+
+/// Get all conversation embeddings for a specific user and channel
+pub fn get_user_conversation_history(user_id: &str, channel_id: &str) -> Vec<ConversationEmbedding> {
+    CONVERSATION_EMBEDDINGS.with(|conversations| {
+        conversations.borrow()
+            .iter()
+            .filter(|conv| conv.user_id == user_id && conv.channel_id == channel_id)
+            .cloned()
+            .collect()
+    })
+}
+
+/// Get the next chunk index for a user in a specific channel
+pub fn get_next_chunk_index(user_id: &str, channel_id: &str) -> u32 {
+    CONVERSATION_EMBEDDINGS.with(|conversations| {
+        conversations.borrow()
+            .iter()
+            .filter(|conv| conv.user_id == user_id && conv.channel_id == channel_id)
+            .map(|conv| conv.chunk_index)
+            .max()
+            .unwrap_or(0) + 1
+    })
+}
+
+/// Search conversation history using semantic similarity
+pub fn search_conversation_history(
+    user_id: &str,
+    channel_id: &str,
+    query_embedding: &[f32],
+    top_k: usize
+) -> Vec<String> {
+    CONVERSATION_EMBEDDINGS.with(|conversations| {
+        let mut scored_conversations: Vec<(f32, ConversationEmbedding)> = conversations.borrow()
+            .iter()
+            .filter(|conv| conv.user_id == user_id && conv.channel_id == channel_id)
+            .map(|conv| {
+                let similarity = cosine_similarity(query_embedding, &conv.embedding);
+                (similarity, conv.clone())
+            })
+            .collect();
+
+        // Sort by similarity score (descending)
+        scored_conversations.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Return top_k conversation summaries/texts
+        scored_conversations
+            .into_iter()
+            .take(top_k)
+            .map(|(_, conv)| if conv.summary.is_empty() { 
+                conv.conversation_text 
+            } else { 
+                conv.summary 
+            })
+            .collect()
+    })
+}
+
+/// Get recent conversation context for a user (last N chunks)
+pub fn get_recent_conversation_context(
+    user_id: &str,
+    channel_id: &str,
+    chunk_count: usize
+) -> Vec<String> {
+    CONVERSATION_EMBEDDINGS.with(|conversations| {
+        let mut user_conversations: Vec<ConversationEmbedding> = conversations.borrow()
+            .iter()
+            .filter(|conv| conv.user_id == user_id && conv.channel_id == channel_id)
+            .cloned()
+            .collect();
+
+        // Sort by chunk_index (most recent first)
+        user_conversations.sort_by(|a, b| b.chunk_index.cmp(&a.chunk_index));
+
+        // Return the most recent chunks
+        user_conversations
+            .into_iter()
+            .take(chunk_count)
+            .map(|conv| if conv.summary.is_empty() { 
+                conv.conversation_text 
+            } else { 
+                conv.summary 
+            })
+            .collect()
+    })
+}
+
+/// Get conversation statistics for a user
+pub fn get_conversation_stats(user_id: &str, channel_id: &str) -> (u32, u32) {
+    CONVERSATION_EMBEDDINGS.with(|conversations| {
+        let borrowed_conversations = conversations.borrow();
+        let user_conversations: Vec<&ConversationEmbedding> = borrowed_conversations
+            .iter()
+            .filter(|conv| conv.user_id == user_id && conv.channel_id == channel_id)
+            .collect();
+
+        let chunk_count = user_conversations.len() as u32;
+        let total_messages = user_conversations
+            .iter()
+            .map(|conv| conv.message_count)
+            .sum::<u32>();
+
+        (chunk_count, total_messages)
+    })
+}
+// Functions for upgrade persistence
+pub fn get_all_user_memories() -> Vec<UserMemory> {
+    USER_MEMORIES.with(|memories| memories.borrow().clone())
+}
+
+pub fn get_all_conversation_embeddings() -> Vec<ConversationEmbedding> {
+    CONVERSATION_EMBEDDINGS.with(|embeddings| embeddings.borrow().clone())
+}
+
+pub fn restore_all_data(
+    personality_data: Vec<PersonalityEmbedding>,
+    user_memories: Vec<UserMemory>,
+    conversation_embeddings: Vec<ConversationEmbedding>
+) {
+    PERSONALITY_EMBEDDINGS.with(|embeddings| {
+        *embeddings.borrow_mut() = personality_data;
+    });
+    
+    USER_MEMORIES.with(|memories| {
+        *memories.borrow_mut() = user_memories;
+    });
+    
+    CONVERSATION_EMBEDDINGS.with(|embeddings| {
+        *embeddings.borrow_mut() = conversation_embeddings;
+    });
 }

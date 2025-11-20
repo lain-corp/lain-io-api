@@ -74,8 +74,8 @@ export const idlFactory = ({ IDL }) => {
   return IDL.Service({
     'accept_friend_request' : IDL.Func([IDL.Text], [ApiResponse], []),
     'add_friend' : IDL.Func([IDL.Principal], [ApiResponse], []),
+    'admin_clear_database' : IDL.Func([], [ApiResponse], []),
     'block_user' : IDL.Func([IDL.Principal], [ApiResponse], []),
-  'admin_clear_database' : IDL.Func([], [ApiResponse], []),
     'clear_all_friend_requests' : IDL.Func([], [ApiResponse], []),
     'debug_get_all_friend_requests' : IDL.Func(
         [],

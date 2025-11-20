@@ -1,5 +1,6 @@
 use candid::{CandidType, Deserialize};
 use ic_llm::{ChatMessage, Model};
+use ic_cdk::storage::{stable_save, stable_restore};
 
 mod context;
 mod personality;
@@ -8,11 +9,18 @@ use context::{RoomConfig, get_system_prompt_for_room, get_all_room_configs, get_
 use personality::{
     PersonalityEmbedding,
     UserMemory,
+    ConversationEmbedding,
     store_personality_embedding,
     store_user_memory,
+    store_conversation_embedding,
     get_all_personality_embeddings,
     search_personality_context,
-    get_channel_personality_context
+    get_channel_personality_context,
+    get_user_conversation_history,
+    get_next_chunk_index,
+    search_conversation_history,
+    get_recent_conversation_context,
+    get_conversation_stats
 };
 
 #[derive(CandidType, Deserialize, Debug)]
@@ -125,3 +133,120 @@ fn search_personality(channel_id: String, query_embedding: Vec<f32>) -> Vec<Stri
     search_personality_context(&channel_id, &query_embedding, 5)
 }
 
+// === CONVERSATION EMBEDDING ENDPOINTS ===
+
+#[ic_cdk::update]
+fn store_conversation_chunk(conversation: ConversationEmbedding) -> String {
+    store_conversation_embedding(conversation);
+    "Conversation chunk stored successfully".to_string()
+}
+
+#[ic_cdk::query]
+fn get_user_conversations(user_id: String, channel_id: String) -> Vec<ConversationEmbedding> {
+    get_user_conversation_history(&user_id, &channel_id)
+}
+
+#[ic_cdk::query]
+fn get_next_conversation_chunk_index(user_id: String, channel_id: String) -> u32 {
+    get_next_chunk_index(&user_id, &channel_id)
+}
+
+#[ic_cdk::query]
+fn search_user_conversation_history(
+    user_id: String,
+    channel_id: String,
+    query_embedding: Vec<f32>,
+    limit: Option<u32>
+) -> Vec<String> {
+    let top_k = limit.unwrap_or(3) as usize;
+    search_conversation_history(&user_id, &channel_id, &query_embedding, top_k)
+}
+
+#[ic_cdk::query]
+fn get_recent_user_conversations(
+    user_id: String,
+    channel_id: String,
+    chunk_count: Option<u32>
+) -> Vec<String> {
+    let count = chunk_count.unwrap_or(3) as usize;
+    get_recent_conversation_context(&user_id, &channel_id, count)
+}
+
+#[ic_cdk::query]
+fn get_user_conversation_stats(user_id: String, channel_id: String) -> (u32, u32) {
+    get_conversation_stats(&user_id, &channel_id)
+}
+
+// Enhanced chat with user conversation context
+#[ic_cdk::update]
+async fn chat_with_user_context(
+    messages: Vec<ChatMessage>,
+    user_id: String,
+    room_id: Option<String>,
+    query_embedding: Vec<f32>
+) -> String {
+    let channel_id = room_id.as_ref().map(|s| s.as_str()).unwrap_or("#general");
+    
+    // Get personality context
+    let personality_context = search_personality_context(channel_id, &query_embedding, 2);
+    
+    // Get user conversation history
+    let user_conversation_context = search_conversation_history(&user_id, channel_id, &query_embedding, 2);
+    
+    // Combine contexts
+    let mut context_parts = Vec::new();
+    
+    if !personality_context.is_empty() {
+        context_parts.push(format!("Personality traits: {}", personality_context.join(" ")));
+    }
+    
+    if !user_conversation_context.is_empty() {
+        context_parts.push(format!("Previous conversations with this user: {}", user_conversation_context.join(" ")));
+    }
+    
+    let enhanced_context = if context_parts.is_empty() {
+        String::new()
+    } else {
+        format!("\n\nContext: {}", context_parts.join("\n"))
+    };
+    
+    // Get base system prompt and enhance with context
+    let base_prompt = get_system_prompt_for_room(channel_id);
+    let system_prompt = if enhanced_context.is_empty() {
+        base_prompt
+    } else {
+        format!("{}{}", base_prompt, enhanced_context)
+    };
+    
+    let mut all_messages = vec![ChatMessage::System {
+        content: system_prompt,
+    }];
+    all_messages.extend(messages);
+
+    let chat = ic_llm::chat(MODEL).with_messages(all_messages);
+    let response = chat.send().await;
+
+    response.message.content.unwrap_or_default()
+}
+
+
+#[ic_cdk::pre_upgrade]
+fn pre_upgrade() {
+    let personality_data = personality::get_all_personality_embeddings();
+    let user_memories = personality::get_all_user_memories();
+    let conversation_embeddings = personality::get_all_conversation_embeddings();
+    
+    stable_save((personality_data, user_memories, conversation_embeddings))
+        .expect("Failed to save data before upgrade");
+}
+
+#[ic_cdk::post_upgrade]
+fn post_upgrade() {
+    if let Ok((personality_data, user_memories, conversation_embeddings)) = stable_restore::<(
+        Vec<personality::PersonalityEmbedding>,
+        Vec<personality::UserMemory>,
+        Vec<personality::ConversationEmbedding>
+    )>() {
+        personality::restore_all_data(personality_data, user_memories, conversation_embeddings);
+    }
+}

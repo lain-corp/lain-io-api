@@ -32,13 +32,31 @@ type personality_embedding = record {
   created_at: nat64;
 };
 
+type conversation_embedding = record {
+  user_id: text;
+  channel_id: text;
+  conversation_text: text;
+  embedding: vec float32;
+  message_count: nat32;
+  chunk_index: nat32;
+  created_at: nat64;
+  summary: text;
+};
+
 service: {
   chat: (vec chat_message, opt text) -> (text);
   chat_default: (vec chat_message) -> (text);
   chat_with_rag: (vec chat_message, opt text, vec float32) -> (text);
+  chat_with_user_context: (vec chat_message, text, opt text, vec float32) -> (text);
   get_available_rooms: () -> (vec room_config) query;
   store_personality: (personality_embedding) -> (text);
   store_personality_batch: (vec personality_embedding) -> (text);
   get_personality_embeddings: () -> (vec personality_embedding) query;
   search_personality: (text, vec float32) -> (vec text) query;
+  store_conversation_chunk: (conversation_embedding) -> (text);
+  get_user_conversations: (text, text) -> (vec conversation_embedding) query;
+  get_next_conversation_chunk_index: (text, text) -> (nat32) query;
+  search_user_conversation_history: (text, text, vec float32, opt nat32) -> (vec text) query;
+  get_recent_user_conversations: (text, text, opt nat32) -> (vec text) query;
+  get_user_conversation_stats: (text, text) -> (nat32, nat32) query;
 }
