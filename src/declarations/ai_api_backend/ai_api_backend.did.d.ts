@@ -2,6 +2,13 @@ import type { Principal } from '@dfinity/principal';
 import type { ActorMethod } from '@dfinity/agent';
 import type { IDL } from '@dfinity/candid';
 
+export interface big_five_traits {
+  'conscientiousness' : number,
+  'neuroticism' : number,
+  'agreeableness' : number,
+  'extraversion' : number,
+  'openness' : number,
+}
 export type chat_message = {
     'tool' : { 'content' : string, 'tool_call_id' : string }
   } |
@@ -44,7 +51,28 @@ export interface room_config {
   'name' : string,
   'description' : string,
 }
+export interface topic_interest {
+  'expertise_level' : number,
+  'topic' : string,
+  'last_mentioned' : bigint,
+  'message_count' : number,
+  'engagement_score' : number,
+  'first_mentioned' : bigint,
+}
+export interface user_profile {
+  'updated_at' : bigint,
+  'personality_traits' : big_five_traits,
+  'interests' : Array<topic_interest>,
+  'created_at' : bigint,
+  'user_id' : string,
+  'total_messages' : number,
+  'aggregated_embedding' : Array<number>,
+  'conversation_count' : number,
+}
 export interface _SERVICE {
+  'analyze_user_interests' : ActorMethod<[string], Array<topic_interest>>,
+  'analyze_user_personality' : ActorMethod<[string], [] | [big_five_traits]>,
+  'calculate_user_similarity' : ActorMethod<[string, string], [] | [number]>,
   'chat' : ActorMethod<[Array<chat_message>, [] | [string]], string>,
   'chat_default' : ActorMethod<[Array<chat_message>], string>,
   'chat_with_rag' : ActorMethod<
@@ -55,7 +83,13 @@ export interface _SERVICE {
     [Array<chat_message>, string, [] | [string], Array<number>],
     string
   >,
+  'create_user_profile' : ActorMethod<[string], [] | [user_profile]>,
+  'get_all_user_profiles' : ActorMethod<[], Array<user_profile>>,
   'get_available_rooms' : ActorMethod<[], Array<room_config>>,
+  'get_friendship_recommendations' : ActorMethod<
+    [string, [] | [number]],
+    Array<[string, number]>
+  >,
   'get_next_conversation_chunk_index' : ActorMethod<[string, string], number>,
   'get_personality_embeddings' : ActorMethod<[], Array<personality_embedding>>,
   'get_recent_user_conversations' : ActorMethod<
@@ -70,6 +104,7 @@ export interface _SERVICE {
     [string, string],
     Array<conversation_embedding>
   >,
+  'get_user_profile_by_id' : ActorMethod<[string], [] | [user_profile]>,
   'search_personality' : ActorMethod<[string, Array<number>], Array<string>>,
   'search_user_conversation_history' : ActorMethod<
     [string, string, Array<number>, [] | [number]],

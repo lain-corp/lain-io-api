@@ -1,4 +1,5 @@
 use candid::{CandidType, Deserialize};
+use std::collections::HashMap;
 
 #[derive(CandidType, Deserialize, Debug, Clone)]
 pub struct PersonalityEmbedding {
@@ -32,11 +33,43 @@ pub struct ConversationEmbedding {
     pub summary: String,        // Brief summary of the conversation chunk
 }
 
+#[derive(CandidType, Deserialize, Debug, Clone)]
+pub struct BigFiveTraits {
+    pub openness: f32,          // 0.0-1.0: openness to experience
+    pub conscientiousness: f32, // 0.0-1.0: organization and discipline  
+    pub extraversion: f32,      // 0.0-1.0: social energy and enthusiasm
+    pub agreeableness: f32,     // 0.0-1.0: cooperation and empathy
+    pub neuroticism: f32,       // 0.0-1.0: emotional instability
+}
+
+#[derive(CandidType, Deserialize, Debug, Clone)]
+pub struct TopicInterest {
+    pub topic: String,          // Topic name (e.g., "technology", "art")
+    pub engagement_score: f32,  // 0.0-1.0: how engaged with this topic
+    pub message_count: u32,     // Number of messages about this topic
+    pub expertise_level: f32,   // 0.0-1.0: estimated expertise
+    pub first_mentioned: u64,   // When first discussed
+    pub last_mentioned: u64,    // Most recent discussion
+}
+
+#[derive(CandidType, Deserialize, Debug, Clone)]
+pub struct UserProfile {
+    pub user_id: String,
+    pub personality_traits: BigFiveTraits,
+    pub interests: Vec<TopicInterest>,
+    pub aggregated_embedding: Vec<f32>, // Average of all conversation embeddings
+    pub conversation_count: u32,
+    pub total_messages: u32,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
 // Storage for personality embeddings (stable memory)
 thread_local! {
     static PERSONALITY_EMBEDDINGS: std::cell::RefCell<Vec<PersonalityEmbedding>> = std::cell::RefCell::new(Vec::new());
     static USER_MEMORIES: std::cell::RefCell<Vec<UserMemory>> = std::cell::RefCell::new(Vec::new());
     static CONVERSATION_EMBEDDINGS: std::cell::RefCell<Vec<ConversationEmbedding>> = std::cell::RefCell::new(Vec::new());
+    pub static USER_PROFILES: std::cell::RefCell<Vec<UserProfile>> = std::cell::RefCell::new(Vec::new());
 }
 
 /// Store a personality embedding (called from frontend)
@@ -290,6 +323,10 @@ pub fn get_all_conversation_embeddings() -> Vec<ConversationEmbedding> {
     CONVERSATION_EMBEDDINGS.with(|embeddings| embeddings.borrow().clone())
 }
 
+pub fn get_all_user_profiles() -> Vec<UserProfile> {
+    USER_PROFILES.with(|profiles| profiles.borrow().clone())
+}
+
 pub fn restore_all_data(
     personality_data: Vec<PersonalityEmbedding>,
     user_memories: Vec<UserMemory>,
@@ -306,4 +343,233 @@ pub fn restore_all_data(
     CONVERSATION_EMBEDDINGS.with(|embeddings| {
         *embeddings.borrow_mut() = conversation_embeddings;
     });
+}
+
+// === USER PROFILING ANALYSIS FUNCTIONS ===
+
+/// Extract Big Five personality traits from conversation text
+pub fn analyze_big_five_traits(conversation_texts: &[String]) -> BigFiveTraits {
+    let combined_text = conversation_texts.join(" ").to_lowercase();
+    
+    // Openness: curiosity, creativity, intellectual interests
+    let openness_markers = ["curious", "wonder", "imagine", "creative", "art", "new", "different", 
+        "explore", "discover", "unique", "abstract", "philosophy", "novel", "innovative"];
+    let openness_score = calculate_trait_score(&combined_text, &openness_markers);
+    
+    // Conscientiousness: organization, discipline, responsibility
+    let conscientiousness_markers = ["organize", "plan", "schedule", "responsibility", "careful", 
+        "detail", "precise", "thorough", "systematic", "disciplined", "reliable", "punctual"];
+    let conscientiousness_score = calculate_trait_score(&combined_text, &conscientiousness_markers);
+    
+    // Extraversion: social energy, enthusiasm, assertiveness
+    let extraversion_markers = ["excited", "enthusiastic", "social", "party", "meet", "talk", 
+        "outgoing", "energetic", "assertive", "confident", "leader", "group"];
+    let extraversion_score = calculate_trait_score(&combined_text, &extraversion_markers);
+    
+    // Agreeableness: cooperation, trust, empathy
+    let agreeableness_markers = ["help", "kind", "empathy", "understand", "support", "care", 
+        "cooperative", "trust", "compassion", "gentle", "generous", "considerate"];
+    let agreeableness_score = calculate_trait_score(&combined_text, &agreeableness_markers);
+    
+    // Neuroticism: emotional instability, anxiety, stress
+    let neuroticism_markers = ["anxious", "worry", "stress", "nervous", "upset", "emotional", 
+        "unstable", "moody", "insecure", "fearful", "tense", "overwhelmed"];
+    let neuroticism_score = calculate_trait_score(&combined_text, &neuroticism_markers);
+    
+    BigFiveTraits {
+        openness: openness_score,
+        conscientiousness: conscientiousness_score,
+        extraversion: extraversion_score,
+        agreeableness: agreeableness_score,
+        neuroticism: neuroticism_score,
+    }
+}
+
+/// Calculate trait score based on keyword frequency
+fn calculate_trait_score(text: &str, markers: &[&str]) -> f32 {
+    let word_count = text.split_whitespace().count() as f32;
+    if word_count == 0.0 {
+        return 0.5; // Default neutral score
+    }
+    
+    let marker_count: f32 = markers
+        .iter()
+        .map(|marker| text.matches(marker).count() as f32)
+        .sum();
+    
+    // Normalize to 0.0-1.0 range
+    let raw_score = marker_count / word_count * 100.0; // Scale up for better resolution
+    (raw_score.min(1.0).max(0.0) + 0.5).min(1.0) // Add baseline and cap at 1.0
+}
+
+/// Extract topic interests from conversation content
+pub fn analyze_topic_interests(conversations: &[ConversationEmbedding]) -> Vec<TopicInterest> {
+    let mut topic_stats: HashMap<String, (f32, u32, u64, u64)> = HashMap::new(); // (engagement, count, first, last)
+    
+    // Define topic keywords
+    let topics = vec![
+        ("technology", vec!["code", "programming", "computer", "software", "ai", "tech", "algorithm", "data"]),
+        ("art", vec!["art", "painting", "drawing", "creative", "design", "aesthetic", "visual", "gallery"]),
+        ("music", vec!["music", "song", "band", "album", "instrument", "melody", "concert", "rhythm"]),
+        ("philosophy", vec!["philosophy", "meaning", "existence", "consciousness", "reality", "ethics", "moral"]),
+        ("science", vec!["science", "research", "experiment", "theory", "discovery", "physics", "biology"]),
+        ("relationships", vec!["love", "friend", "relationship", "family", "emotion", "feelings", "dating"]),
+        ("gaming", vec!["game", "play", "gaming", "video", "console", "strategy", "rpg", "adventure"]),
+        ("books", vec!["book", "read", "novel", "author", "story", "literature", "writing", "chapter"]),
+        ("movies", vec!["movie", "film", "cinema", "actor", "director", "plot", "scene", "hollywood"]),
+        ("food", vec!["food", "cook", "recipe", "restaurant", "taste", "flavor", "cuisine", "meal"])
+    ];
+    
+    for conversation in conversations {
+        let text_lower = conversation.conversation_text.to_lowercase();
+        let timestamp = conversation.created_at;
+        
+        for (topic, keywords) in &topics {
+            let mut topic_mentions = 0;
+            let mut engagement_score = 0.0;
+            
+            for keyword in keywords {
+                let count = text_lower.matches(keyword).count();
+                topic_mentions += count;
+                engagement_score += count as f32;
+            }
+            
+            if topic_mentions > 0 {
+                let entry = topic_stats.entry(topic.to_string()).or_insert((0.0, 0, timestamp, timestamp));
+                entry.0 += engagement_score;
+                entry.1 += topic_mentions as u32;
+                entry.2 = entry.2.min(timestamp); // First mention
+                entry.3 = entry.3.max(timestamp); // Last mention
+            }
+        }
+    }
+    
+    topic_stats
+        .into_iter()
+        .map(|(topic, (engagement, count, first, last))| {
+            let normalized_engagement = (engagement / conversations.len() as f32).min(1.0);
+            let expertise_level = (count as f32 / 20.0).min(1.0); // Normalize to 0-1
+            
+            TopicInterest {
+                topic,
+                engagement_score: normalized_engagement,
+                message_count: count,
+                expertise_level,
+                first_mentioned: first,
+                last_mentioned: last,
+            }
+        })
+        .filter(|interest| interest.engagement_score > 0.01) // Only include meaningful interests
+        .collect()
+}
+
+/// Generate aggregated embedding for a user from their conversation embeddings
+pub fn generate_user_embedding(user_id: &str) -> Vec<f32> {
+    CONVERSATION_EMBEDDINGS.with(|conversations| {
+        let borrowed_conversations = conversations.borrow();
+        let user_conversations: Vec<&ConversationEmbedding> = borrowed_conversations
+            .iter()
+            .filter(|conv| conv.user_id == user_id)
+            .collect();
+            
+        if user_conversations.is_empty() {
+            return vec![0.0; 384]; // Return zero vector if no conversations
+        }
+        
+        let embedding_dim = user_conversations[0].embedding.len();
+        let mut aggregated = vec![0.0; embedding_dim];
+        
+        // Weight recent conversations more heavily (exponential decay)
+        let now = ic_cdk::api::time();
+        let mut total_weight = 0.0;
+        
+        for conversation in &user_conversations {
+            // Calculate time-based weight (more recent = higher weight)
+            let age_days = ((now - conversation.created_at) / (24 * 60 * 60 * 1_000_000_000)) as f32;
+            let weight = (-age_days / 30.0).exp(); // 30-day half-life
+            total_weight += weight;
+            
+            for (i, &value) in conversation.embedding.iter().enumerate() {
+                aggregated[i] += value * weight;
+            }
+        }
+        
+        // Normalize by total weight
+        if total_weight > 0.0 {
+            for value in aggregated.iter_mut() {
+                *value /= total_weight;
+            }
+        }
+        
+        // L2 normalize the final embedding
+        let magnitude: f32 = aggregated.iter().map(|&x| x * x).sum::<f32>().sqrt();
+        if magnitude > 0.0 {
+            for value in aggregated.iter_mut() {
+                *value /= magnitude;
+            }
+        }
+        
+        aggregated
+    })
+}
+
+/// Generate or update a user profile from their conversation data
+pub fn generate_user_profile(user_id: &str) -> Option<UserProfile> {
+    let conversations = get_user_conversation_history(user_id, ""); // Get all channels
+    
+    if conversations.len() < 3 {
+        return None; // Not enough data for reliable profiling
+    }
+    
+    let conversation_texts: Vec<String> = conversations
+        .iter()
+        .map(|conv| conv.conversation_text.clone())
+        .collect();
+    
+    let personality_traits = analyze_big_five_traits(&conversation_texts);
+    let interests = analyze_topic_interests(&conversations);
+    let aggregated_embedding = generate_user_embedding(user_id);
+    
+    let conversation_count = conversations.len() as u32;
+    let total_messages: u32 = conversations.iter().map(|conv| conv.message_count).sum();
+    let now = ic_cdk::api::time();
+    
+    let profile = UserProfile {
+        user_id: user_id.to_string(),
+        personality_traits,
+        interests,
+        aggregated_embedding,
+        conversation_count,
+        total_messages,
+        created_at: now,
+        updated_at: now,
+    };
+    
+    // Store or update the profile
+    USER_PROFILES.with(|profiles| {
+        let mut borrowed_profiles = profiles.borrow_mut();
+        
+        // Remove existing profile if it exists
+        borrowed_profiles.retain(|p| p.user_id != user_id);
+        
+        // Add new profile
+        borrowed_profiles.push(profile.clone());
+    });
+    
+    Some(profile)
+}
+
+/// Get user profile by ID
+pub fn get_user_profile(user_id: &str) -> Option<UserProfile> {
+    USER_PROFILES.with(|profiles| {
+        profiles.borrow()
+            .iter()
+            .find(|profile| profile.user_id == user_id)
+            .cloned()
+    })
+}
+
+/// Get all user profiles
+pub fn get_all_profiles() -> Vec<UserProfile> {
+    USER_PROFILES.with(|profiles| profiles.borrow().clone())
 }

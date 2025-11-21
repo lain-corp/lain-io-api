@@ -43,6 +43,34 @@ type conversation_embedding = record {
   summary: text;
 };
 
+type big_five_traits = record {
+  openness: float32;
+  conscientiousness: float32;
+  extraversion: float32;
+  agreeableness: float32;
+  neuroticism: float32;
+};
+
+type topic_interest = record {
+  topic: text;
+  engagement_score: float32;
+  message_count: nat32;
+  expertise_level: float32;
+  first_mentioned: nat64;
+  last_mentioned: nat64;
+};
+
+type user_profile = record {
+  user_id: text;
+  personality_traits: big_five_traits;
+  interests: vec topic_interest;
+  aggregated_embedding: vec float32;
+  conversation_count: nat32;
+  total_messages: nat32;
+  created_at: nat64;
+  updated_at: nat64;
+};
+
 service: {
   chat: (vec chat_message, opt text) -> (text);
   chat_default: (vec chat_message) -> (text);
@@ -59,4 +87,13 @@ service: {
   search_user_conversation_history: (text, text, vec float32, opt nat32) -> (vec text) query;
   get_recent_user_conversations: (text, text, opt nat32) -> (vec text) query;
   get_user_conversation_stats: (text, text) -> (nat32, nat32) query;
+  
+  // User Profiling API
+  get_user_profile_by_id: (text) -> (opt user_profile) query;
+  create_user_profile: (text) -> (opt user_profile);
+  get_all_user_profiles: () -> (vec user_profile) query;
+  analyze_user_personality: (text) -> (opt big_five_traits) query;
+  analyze_user_interests: (text) -> (vec topic_interest) query;
+  calculate_user_similarity: (text, text) -> (opt float32) query;
+  get_friendship_recommendations: (text, opt nat32) -> (vec record { text; float32 }) query;
 }

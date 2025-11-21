@@ -4,12 +4,16 @@ use ic_cdk::storage::{stable_save, stable_restore};
 
 mod context;
 mod personality;
+mod user_profiling;
 
 use context::{RoomConfig, get_system_prompt_for_room, get_all_room_configs, get_enhanced_system_prompt_for_room};
 use personality::{
     PersonalityEmbedding,
     UserMemory,
     ConversationEmbedding,
+    BigFiveTraits,
+    TopicInterest,
+    UserProfile,
     store_personality_embedding,
     store_user_memory,
     store_conversation_embedding,
@@ -20,7 +24,12 @@ use personality::{
     get_next_chunk_index,
     search_conversation_history,
     get_recent_conversation_context,
-    get_conversation_stats
+    get_conversation_stats,
+    generate_user_profile,
+    get_user_profile,
+    get_all_profiles,
+    analyze_big_five_traits,
+    analyze_topic_interests
 };
 
 #[derive(CandidType, Deserialize, Debug)]
@@ -229,24 +238,82 @@ async fn chat_with_user_context(
     response.message.content.unwrap_or_default()
 }
 
+// === USER PROFILING API ENDPOINTS ===
+
+#[ic_cdk::query]
+pub fn get_user_profile_by_id(user_id: String) -> Option<UserProfile> {
+    get_user_profile(&user_id)
+}
+
+#[ic_cdk::update]
+pub fn create_user_profile(user_id: String) -> Option<UserProfile> {
+    generate_user_profile(&user_id)
+}
+
+#[ic_cdk::query]
+pub fn get_all_user_profiles() -> Vec<UserProfile> {
+    get_all_profiles()
+}
+
+#[ic_cdk::query]
+pub fn analyze_user_personality(user_id: String) -> Option<BigFiveTraits> {
+    let conversations = get_user_conversation_history(&user_id, "");
+    if conversations.is_empty() {
+        return None;
+    }
+    
+    let texts: Vec<String> = conversations
+        .iter()
+        .map(|conv| conv.conversation_text.clone())
+        .collect();
+    
+    Some(analyze_big_five_traits(&texts))
+}
+
+#[ic_cdk::query]
+pub fn analyze_user_interests(user_id: String) -> Vec<TopicInterest> {
+    let conversations = get_user_conversation_history(&user_id, "");
+    analyze_topic_interests(&conversations)
+}
+
+#[ic_cdk::query]
+pub fn calculate_user_similarity(user1_id: String, user2_id: String) -> Option<f32> {
+    let profile1 = get_user_profile(&user1_id)?;
+    let profile2 = get_user_profile(&user2_id)?;
+    
+    Some(user_profiling::calculate_user_similarity(&profile1, &profile2))
+}
+
+#[ic_cdk::query]
+pub fn get_friendship_recommendations(user_id: String, limit: Option<u32>) -> Vec<(String, f32)> {
+    let limit = limit.unwrap_or(10);
+    user_profiling::get_friendship_recommendations(&user_id, limit)
+}
+
 
 #[ic_cdk::pre_upgrade]
 fn pre_upgrade() {
     let personality_data = personality::get_all_personality_embeddings();
     let user_memories = personality::get_all_user_memories();
     let conversation_embeddings = personality::get_all_conversation_embeddings();
+    let user_profiles = personality::get_all_user_profiles();
     
-    stable_save((personality_data, user_memories, conversation_embeddings))
+    stable_save((personality_data, user_memories, conversation_embeddings, user_profiles))
         .expect("Failed to save data before upgrade");
 }
 
 #[ic_cdk::post_upgrade]
 fn post_upgrade() {
-    if let Ok((personality_data, user_memories, conversation_embeddings)) = stable_restore::<(
+    if let Ok((personality_data, user_memories, conversation_embeddings, user_profiles)) = stable_restore::<(
         Vec<personality::PersonalityEmbedding>,
         Vec<personality::UserMemory>,
-        Vec<personality::ConversationEmbedding>
+        Vec<personality::ConversationEmbedding>,
+        Vec<personality::UserProfile>
     )>() {
         personality::restore_all_data(personality_data, user_memories, conversation_embeddings);
+        // Restore user profiles
+        personality::USER_PROFILES.with(|profiles| {
+            *profiles.borrow_mut() = user_profiles;
+        });
     }
 }
