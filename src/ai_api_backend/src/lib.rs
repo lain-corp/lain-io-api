@@ -1,5 +1,5 @@
 use candid::{CandidType, Deserialize};
-use ic_llm::{ChatMessage, Model};
+use ic_llm::{ChatMessage, Model, ParameterType};
 use ic_cdk::storage::{stable_save, stable_restore};
 
 mod context;
@@ -82,8 +82,17 @@ async fn chat_with_rag(
 ) -> String {
     let channel_id = room_id.as_ref().map(|s| s.as_str()).unwrap_or("#general");
     
+    // Get caller's principal as user ID
+    let caller = ic_cdk::caller();
+    let user_id = caller.to_text();
+    
+    ic_cdk::println!("DEBUG: chat_with_rag called with channel_id: {}, user_id: {}", channel_id, user_id);
+    
     // Retrieve relevant personality context using RAG
     let personality_context = search_personality_context(channel_id, &query_embedding, 3);
+    
+    // Get user conversation history
+    let user_conversation_context = search_conversation_history(&user_id, channel_id, &query_embedding, 2);
     
     // Generate enhanced system prompt with retrieved context
     let enhanced_system_prompt = get_enhanced_system_prompt_for_room(channel_id, &personality_context);
@@ -93,8 +102,39 @@ async fn chat_with_rag(
     }];
     all_messages.extend(messages);
 
-    let chat = ic_llm::chat(MODEL).with_messages(all_messages);
+    // Create chat with optional friendship tool for #friends channel only
+    let mut chat = ic_llm::chat(MODEL).with_messages(all_messages);
+    
+    // Add friendship recommendation tool only in #friends channel
+    if channel_id == "#friends" {
+        ic_cdk::println!("DEBUG: Adding friendship tool for #friends channel in chat_with_rag");
+        chat = chat.with_tools(vec![
+            ic_llm::tool("get_friendship_recommendations")
+                .with_description("Find users with compatible personality traits and interests for friendship recommendations. Use when users ask about meeting people, finding friends, or social connections.")
+                .with_parameter(
+                    ic_llm::parameter("user_id", ParameterType::String)
+                        .with_description("The user ID to find recommendations for")
+                        .is_required()
+                )
+                .with_parameter(
+                    ic_llm::parameter("limit", ParameterType::Number)
+                        .with_description("Maximum number of recommendations to return (default: 5)")
+                )
+                .build()
+        ]);
+    } else {
+        ic_cdk::println!("DEBUG: Channel is {}, not adding friendship tools in chat_with_rag", channel_id);
+    }
+    
     let response = chat.send().await;
+    
+    ic_cdk::println!("DEBUG: chat_with_rag response received, tool_calls count: {}", response.message.tool_calls.len());
+    
+    // Handle tool calls if any
+    if !response.message.tool_calls.is_empty() {
+        ic_cdk::println!("DEBUG: Processing {} tool calls in chat_with_rag", response.message.tool_calls.len());
+        return handle_friendship_tool_calls(response, &user_id, channel_id, &personality_context, &user_conversation_context).await;
+    }
 
     response.message.content.unwrap_or_default()
 }
@@ -232,10 +272,124 @@ async fn chat_with_user_context(
     }];
     all_messages.extend(messages);
 
-    let chat = ic_llm::chat(MODEL).with_messages(all_messages);
+    // Create chat with optional friendship tool for #friends channel only
+    let mut chat = ic_llm::chat(MODEL).with_messages(all_messages);
+    
+    // Add friendship recommendation tool only in #friends channel
+    if channel_id == "#friends" {
+        ic_cdk::println!("DEBUG: Adding friendship tool for #friends channel");
+        chat = chat.with_tools(vec![
+            ic_llm::tool("get_friendship_recommendations")
+                .with_description("Find users with compatible personality traits and interests for friendship recommendations. Use when users ask about meeting people, finding friends, or social connections.")
+                .with_parameter(
+                    ic_llm::parameter("user_id", ParameterType::String)
+                        .with_description("The user ID to find recommendations for")
+                        .is_required()
+                )
+                .with_parameter(
+                    ic_llm::parameter("limit", ParameterType::Number)
+                        .with_description("Maximum number of recommendations to return (default: 5)")
+                )
+                .build()
+        ]);
+    } else {
+        ic_cdk::println!("DEBUG: Channel is {}, not adding friendship tools", channel_id);
+    }
+    
     let response = chat.send().await;
-
+    
+    ic_cdk::println!("DEBUG: Response received, tool_calls count: {}", response.message.tool_calls.len());
+    
+    // Handle tool calls if any
+    if !response.message.tool_calls.is_empty() {
+        ic_cdk::println!("DEBUG: Processing {} tool calls", response.message.tool_calls.len());
+        return handle_friendship_tool_calls(response, &user_id, channel_id, &personality_context, &user_conversation_context).await;
+    }
+    
     response.message.content.unwrap_or_default()
+}
+
+/// Handle friendship tool calls and generate follow-up response
+async fn handle_friendship_tool_calls(
+    initial_response: ic_llm::Response,
+    user_id: &str,
+    channel_id: &str,
+    personality_context: &[String],
+    user_conversation_context: &[String]
+) -> String {
+    ic_cdk::println!("DEBUG: handle_friendship_tool_calls called with {} tool calls", initial_response.message.tool_calls.len());
+    let mut tool_results = Vec::new();
+    
+    // Process each tool call
+    for tool_call in &initial_response.message.tool_calls {
+        ic_cdk::println!("DEBUG: Processing tool call: {}", tool_call.function.name);
+        match tool_call.function.name.as_str() {
+            "get_friendship_recommendations" => {
+                ic_cdk::println!("DEBUG: Friendship recommendations tool called");
+                
+                // Extract parameters
+                let target_user_id = tool_call.function.get("user_id")
+                    .unwrap_or(user_id.to_string());
+                let limit = tool_call.function.get("limit")
+                    .and_then(|s| s.parse::<u32>().ok())
+                    .unwrap_or(5);
+                
+                ic_cdk::println!("DEBUG: Parameters - user_id: {}, limit: {}", target_user_id, limit);
+                
+                // Get recommendations
+                let recommendations = get_friendship_recommendations(target_user_id, Some(limit));
+                
+                ic_cdk::println!("DEBUG: Got {} recommendations", recommendations.len());
+                
+                let result = if recommendations.is_empty() {
+                    "No friendship recommendations found. You might want to have more conversations first to build your profile!".to_string()
+                } else {
+                    let mut formatted = "Here are your friendship recommendations based on personality and interest compatibility:\n\n".to_string();
+                    for (i, (recommended_user_id, similarity)) in recommendations.iter().enumerate() {
+                        formatted.push_str(&format!("{}. **{}** - {}% compatibility\n", 
+                            i + 1, recommended_user_id, (similarity * 100.0) as u32));
+                    }
+                    formatted.push_str("\nWould you like to know more about what makes you compatible with any of these users?");
+                    formatted
+                };
+                
+                ic_cdk::println!("DEBUG: Tool result: {}", result);
+                
+                tool_results.push(ChatMessage::Tool {
+                    content: result,
+                    tool_call_id: tool_call.id.clone(),
+                });
+            }
+            _ => {
+                ic_cdk::println!("DEBUG: Unknown tool call: {}", tool_call.function.name);
+                // Handle unknown tool calls
+                tool_results.push(ChatMessage::Tool {
+                    content: "Unknown tool call".to_string(),
+                    tool_call_id: tool_call.id.clone(),
+                });
+            }
+        }
+    }
+    
+    // Send follow-up request with tool results
+    ic_cdk::println!("DEBUG: Preparing follow-up request with {} tool results", tool_results.len());
+    let base_prompt = get_system_prompt_for_room(channel_id);
+    let mut follow_up_messages = vec![
+        ChatMessage::System { content: base_prompt },
+        ChatMessage::Assistant(initial_response.message.clone()),
+    ];
+    follow_up_messages.extend(tool_results);
+
+    ic_cdk::println!("DEBUG: Sending follow-up chat with {} total messages", follow_up_messages.len());
+    
+    let follow_up_response = ic_llm::chat(MODEL)
+        .with_messages(follow_up_messages)
+        .send()
+        .await;
+
+    ic_cdk::println!("DEBUG: Follow-up response received");
+    
+    follow_up_response.message.content.unwrap_or_default()
 }
 
 // === USER PROFILING API ENDPOINTS ===
