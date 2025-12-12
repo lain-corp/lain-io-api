@@ -83,6 +83,31 @@ type BlockedUser = record {
     blocked_at : nat64;
 };
 
+type DirectMessage = record {
+    id : text;
+    text : text;
+    sender_principal : principal;
+    timestamp : nat64;
+    dm_channel_id : text;
+};
+
+type DmMessagesResponse = record {
+    messages : vec DirectMessage;
+    has_more : bool;
+};
+
+type ApiResponseDirectMessage = record {
+    success : bool;
+    data : opt DirectMessage;
+    error : opt text;
+};
+
+type ApiResponseDmMessagesResponse = record {
+    success : bool;
+    data : opt DmMessagesResponse;
+    error : opt text;
+};
+
 service : {
     // User Registry
     "register_user" : (text, opt text, opt text) -> (ApiResponseUserProfile);
@@ -115,4 +140,8 @@ service : {
     "debug_get_all_friend_requests" : () -> (ApiResponseVecFriendRequest) query;
     "clear_all_friend_requests" : () -> (ApiResponse);
     "admin_clear_database" : () -> (ApiResponse);
+    
+    // Direct Messages (P2P)
+    "send_dm" : (principal, text) -> (ApiResponseDirectMessage);
+    "get_dm_messages" : (principal, opt nat32, opt nat64) -> (ApiResponseDmMessagesResponse) query;
 }

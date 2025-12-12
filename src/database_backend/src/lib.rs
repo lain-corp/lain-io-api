@@ -3,7 +3,7 @@ mod types;
 
 use candid::Principal;
 use ic_cdk::{caller, query, update};
-use types::{ApiResponse, Friend, FriendRequest, FriendRequestStatus, UserProfile, UserSearchResult, BlockedUser, ChatMessage, UserDataSync, SyncResponse};
+use types::{ApiResponse, Friend, FriendRequest, FriendRequestStatus, UserProfile, UserSearchResult, BlockedUser, ChatMessage, UserDataSync, SyncResponse, DirectMessage, DmMessages, DmMessagesResponse};
 
 // ============ USER REGISTRY METHODS ============
 
@@ -527,13 +527,10 @@ fn sync_user_data(chat_messages: Vec<ChatMessage>) -> ApiResponse<SyncResponse> 
     let caller_principal = caller();
     let now = ic_cdk::api::time();
     
-    // Debug: Log incoming messages
-    ic_cdk::println!("=== SYNC DEBUG START ===");
-    ic_cdk::println!("Received {} messages for principal: {}", chat_messages.len(), caller_principal);
-    for (i, msg) in chat_messages.iter().enumerate() {
-        ic_cdk::println!("Message {}: id={}, text={}, sender={}, timestamp={}, channel={:?}", 
-            i, msg.id, msg.text, msg.sender, msg.timestamp, msg.channel);
-    }
+    // Debug: Log incoming messages (commented out for now)
+    // for (i, msg) in chat_messages.iter().enumerate() {
+    //     ic_cdk::println!("{}: {} {} {} {} {:?}", i, msg.id, msg.text, msg.sender, msg.timestamp, msg.channel);
+    // }
     
     // Create or update user data sync
     let user_data = UserDataSync {
@@ -545,29 +542,21 @@ fn sync_user_data(chat_messages: Vec<ChatMessage>) -> ApiResponse<SyncResponse> 
     };
     
     let messages_count = user_data.chat_messages.len() as u32;
-    ic_cdk::println!("Created UserDataSync with {} messages", messages_count);
     
     // Store the sync data
     storage::USER_DATA_SYNC.with(|sync_data| {
         sync_data.borrow_mut().insert(caller_principal, user_data);
     });
     
-    // Debug: Verify storage
-    let stored_data = storage::USER_DATA_SYNC.with(|sync_data| {
-        sync_data.borrow().get(&caller_principal)
-    });
-    
-    match stored_data {
-        Some(data) => {
-            ic_cdk::println!("Stored data verification: {} messages", data.chat_messages.len());
-            for (i, msg) in data.chat_messages.iter().enumerate() {
-                ic_cdk::println!("Stored message {}: id={}, text={}, sender={}", 
-                    i, msg.id, msg.text, msg.sender);
-            }
-        },
-        None => ic_cdk::println!("ERROR: No data found after storage!"),
-    }
-    ic_cdk::println!("=== SYNC DEBUG END ===");
+    // Debug: Verify storage (commented out for now)
+    // let stored_data = storage::USER_DATA_SYNC.with(|sync_data| {
+    //     sync_data.borrow().get(&caller_principal)
+    // });
+    // if let Some(data) = stored_data {
+    //     for (i, msg) in data.chat_messages.iter().enumerate() {
+    //         ic_cdk::println!("{}: {} {} {}", i, msg.id, msg.text, msg.sender);
+    //     }
+    // }
     
     let response = SyncResponse {
         success: true,
@@ -613,40 +602,32 @@ fn get_user_chat_messages(channel: Option<String>) -> ApiResponse<Vec<ChatMessag
 
 #[query]
 fn debug_get_user_chat_messages(user_principal: Principal, channel: Option<String>) -> ApiResponse<Vec<ChatMessage>> {
-    ic_cdk::println!("Debug: Getting messages for principal: {} with channel: {:?}", user_principal.to_text(), channel);
     
     match storage::USER_DATA_SYNC.with(|sync_data| {
         sync_data.borrow().get(&user_principal)
     }) {
         Some(data) => {
-            ic_cdk::println!("Debug: Found sync data with {} messages", data.chat_messages.len());
             
             let filtered_messages: Vec<ChatMessage> = if let Some(channel_filter) = channel {
-                ic_cdk::println!("Debug: Filtering by channel: {}", channel_filter);
                 let filtered: Vec<ChatMessage> = data.chat_messages.into_iter()
                     .filter(|msg| {
                         let matches = msg.channel.as_ref() == Some(&channel_filter);
-                        ic_cdk::println!("Debug: Message {} channel {:?} matches {}: {}", msg.id, msg.channel, channel_filter, matches);
                         matches
                     })
                     .collect();
-                ic_cdk::println!("Debug: After filtering: {} messages", filtered.len());
                 filtered
             } else {
-                ic_cdk::println!("Debug: No channel filter, returning all {} messages", data.chat_messages.len());
                 data.chat_messages
             };
             
-            // Log first few messages for debugging
-            for (i, msg) in filtered_messages.iter().take(3).enumerate() {
-                ic_cdk::println!("Debug: Message {}: id={}, text={}, sender={}, channel={:?}", 
-                    i, msg.id, msg.text.chars().take(50).collect::<String>(), msg.sender, msg.channel);
-            }
+            // Log first few messages for debugging (commented out)
+            // for (i, msg) in filtered_messages.iter().take(3).enumerate() {
+            //     ic_cdk::println!("{}: {} {} {} {:?}", i, msg.id, msg.text.chars().take(50).collect::<String>(), msg.sender, msg.channel);
+            // }
             
             ApiResponse::success(filtered_messages)
         },
         None => {
-            ic_cdk::println!("Debug: No sync data found for principal: {}", user_principal.to_text());
             ApiResponse::success(vec![])
         }
     }
@@ -724,4 +705,134 @@ fn debug_get_all_sync_data() -> ApiResponse<Vec<(String, UserDataSync)>> {
     });
     
     ApiResponse::success(all_sync_data)
+}
+
+// ============ DIRECT MESSAGE METHODS ============
+
+/// Generate a consistent DM channel ID from two principals (sorted alphabetically)
+fn generate_dm_channel_id(principal1: &Principal, principal2: &Principal) -> String {
+    let p1 = principal1.to_text();
+    let p2 = principal2.to_text();
+    if p1 < p2 {
+        format!("dm_{}_{}", &p1[..8.min(p1.len())], &p2[..8.min(p2.len())])
+    } else {
+        format!("dm_{}_{}", &p2[..8.min(p2.len())], &p1[..8.min(p1.len())])
+    }
+}
+
+#[update]
+fn send_dm(to_principal: Principal, text: String) -> ApiResponse<DirectMessage> {
+    let caller_principal = caller();
+    
+    // Cannot send DM to yourself
+    if caller_principal == to_principal {
+        return ApiResponse::error("Cannot send DM to yourself".to_string());
+    }
+    
+    // Validate both users exist
+    let caller_exists = storage::USER_PROFILES.with(|profiles| {
+        profiles.borrow().contains_key(&caller_principal)
+    });
+    if !caller_exists {
+        return ApiResponse::error("Sender not registered".to_string());
+    }
+    
+    let recipient_exists = storage::USER_PROFILES.with(|profiles| {
+        profiles.borrow().contains_key(&to_principal)
+    });
+    if !recipient_exists {
+        return ApiResponse::error("Recipient not found".to_string());
+    }
+    
+    // Validate friendship (must be friends to DM)
+    let are_friends = storage::FRIENDS.with(|friends| {
+        friends.borrow().contains_key(&(caller_principal, to_principal))
+    });
+    if !are_friends {
+        return ApiResponse::error("Cannot send DM: not friends".to_string());
+    }
+    
+    // Check if blocked
+    let is_blocked = storage::BLOCKED_USERS.with(|blocked| {
+        blocked.borrow().contains_key(&(caller_principal, to_principal)) ||
+        blocked.borrow().contains_key(&(to_principal, caller_principal))
+    });
+    if is_blocked {
+        return ApiResponse::error("Cannot send DM: user is blocked".to_string());
+    }
+    
+    // Generate channel ID and message
+    let dm_channel_id = generate_dm_channel_id(&caller_principal, &to_principal);
+    let now = ic_cdk::api::time();
+    let message_id = format!("{}_{}", now, caller_principal.to_text());
+    
+    let message = DirectMessage {
+        id: message_id,
+        text,
+        sender_principal: caller_principal,
+        timestamp: now,
+        dm_channel_id: dm_channel_id.clone(),
+    };
+    
+    // Store the message
+    storage::DM_MESSAGES.with(|dm_messages| {
+        let mut dm_messages = dm_messages.borrow_mut();
+        let mut channel_messages = dm_messages.get(&dm_channel_id).unwrap_or_default();
+        channel_messages.messages.push(message.clone());
+        dm_messages.insert(dm_channel_id, channel_messages);
+    });
+    
+    ApiResponse::success(message)
+}
+
+#[query]
+fn get_dm_messages(friend_principal: Principal, limit: Option<u32>, before_timestamp: Option<u64>) -> ApiResponse<DmMessagesResponse> {
+    let caller_principal = caller();
+    
+    // Cannot get DMs with yourself
+    if caller_principal == friend_principal {
+        return ApiResponse::error("Invalid friend principal".to_string());
+    }
+    
+    // Validate friendship (must be friends to read DMs)
+    let are_friends = storage::FRIENDS.with(|friends| {
+        friends.borrow().contains_key(&(caller_principal, friend_principal))
+    });
+    if !are_friends {
+        return ApiResponse::error("Cannot read DMs: not friends".to_string());
+    }
+    
+    // Generate channel ID
+    let dm_channel_id = generate_dm_channel_id(&caller_principal, &friend_principal);
+    
+    // Get messages with pagination
+    let limit = limit.unwrap_or(50) as usize;
+    
+    let result = storage::DM_MESSAGES.with(|dm_messages| {
+        let dm_messages = dm_messages.borrow();
+        match dm_messages.get(&dm_channel_id) {
+            Some(channel_messages) => {
+                let mut messages: Vec<DirectMessage> = channel_messages.messages.clone();
+                
+                // Filter by before_timestamp if provided (for pagination)
+                if let Some(before_ts) = before_timestamp {
+                    messages.retain(|m| m.timestamp < before_ts);
+                }
+                
+                // Sort by timestamp descending (newest first)
+                messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+                
+                // Check if there are more messages
+                let has_more = messages.len() > limit;
+                
+                // Take only the requested limit
+                let messages: Vec<DirectMessage> = messages.into_iter().take(limit).collect();
+                
+                DmMessagesResponse { messages, has_more }
+            },
+            None => DmMessagesResponse { messages: vec![], has_more: false },
+        }
+    });
+    
+    ApiResponse::success(result)
 }

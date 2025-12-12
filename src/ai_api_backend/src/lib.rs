@@ -47,7 +47,7 @@ pub struct HttpResponse {
     pub body: Vec<u8>,
 }
 
-const MODEL: Model = Model::Qwen3_32B;
+const MODEL: Model = Model::Llama3_8B;
 
 #[ic_cdk::update]
 async fn chat(messages: Vec<ChatMessage>, room_id: Option<String>) -> String {
@@ -86,7 +86,6 @@ async fn chat_with_rag(
     let caller = ic_cdk::caller();
     let user_id = caller.to_text();
     
-    ic_cdk::println!("DEBUG: chat_with_rag called with channel_id: {}, user_id: {}", channel_id, user_id);
     
     // Retrieve relevant personality context using RAG
     let personality_context = search_personality_context(channel_id, &query_embedding, 3);
@@ -107,7 +106,6 @@ async fn chat_with_rag(
     
     // Add friendship recommendation tool only in #friends channel
     if channel_id == "#friends" {
-        ic_cdk::println!("DEBUG: Adding friendship tool for #friends channel in chat_with_rag");
         chat = chat.with_tools(vec![
             ic_llm::tool("get_friendship_recommendations")
                 .with_description("Find users with compatible personality traits and interests for friendship recommendations. Use when users ask about meeting people, finding friends, or social connections.")
@@ -123,16 +121,13 @@ async fn chat_with_rag(
                 .build()
         ]);
     } else {
-        ic_cdk::println!("DEBUG: Channel is {}, not adding friendship tools in chat_with_rag", channel_id);
     }
     
     let response = chat.send().await;
     
-    ic_cdk::println!("DEBUG: chat_with_rag response received, tool_calls count: {}", response.message.tool_calls.len());
     
     // Handle tool calls if any
     if !response.message.tool_calls.is_empty() {
-        ic_cdk::println!("DEBUG: Processing {} tool calls in chat_with_rag", response.message.tool_calls.len());
         return handle_friendship_tool_calls(response, &user_id, channel_id, &personality_context, &user_conversation_context).await;
     }
 
@@ -277,7 +272,6 @@ async fn chat_with_user_context(
     
     // Add friendship recommendation tool only in #friends channel
     if channel_id == "#friends" {
-        ic_cdk::println!("DEBUG: Adding friendship tool for #friends channel");
         chat = chat.with_tools(vec![
             ic_llm::tool("get_friendship_recommendations")
                 .with_description("Find users with compatible personality traits and interests for friendship recommendations. Use when users ask about meeting people, finding friends, or social connections.")
@@ -293,16 +287,13 @@ async fn chat_with_user_context(
                 .build()
         ]);
     } else {
-        ic_cdk::println!("DEBUG: Channel is {}, not adding friendship tools", channel_id);
     }
     
     let response = chat.send().await;
     
-    ic_cdk::println!("DEBUG: Response received, tool_calls count: {}", response.message.tool_calls.len());
     
     // Handle tool calls if any
     if !response.message.tool_calls.is_empty() {
-        ic_cdk::println!("DEBUG: Processing {} tool calls", response.message.tool_calls.len());
         return handle_friendship_tool_calls(response, &user_id, channel_id, &personality_context, &user_conversation_context).await;
     }
     
@@ -317,15 +308,12 @@ async fn handle_friendship_tool_calls(
     personality_context: &[String],
     user_conversation_context: &[String]
 ) -> String {
-    ic_cdk::println!("DEBUG: handle_friendship_tool_calls called with {} tool calls", initial_response.message.tool_calls.len());
     let mut tool_results = Vec::new();
     
     // Process each tool call
     for tool_call in &initial_response.message.tool_calls {
-        ic_cdk::println!("DEBUG: Processing tool call: {}", tool_call.function.name);
         match tool_call.function.name.as_str() {
             "get_friendship_recommendations" => {
-                ic_cdk::println!("DEBUG: Friendship recommendations tool called");
                 
                 // Extract parameters
                 let target_user_id = tool_call.function.get("user_id")
@@ -334,12 +322,10 @@ async fn handle_friendship_tool_calls(
                     .and_then(|s| s.parse::<u32>().ok())
                     .unwrap_or(5);
                 
-                ic_cdk::println!("DEBUG: Parameters - user_id: {}, limit: {}", target_user_id, limit);
                 
                 // Get recommendations
                 let recommendations = get_friendship_recommendations(target_user_id, Some(limit));
                 
-                ic_cdk::println!("DEBUG: Got {} recommendations", recommendations.len());
                 
                 let result = if recommendations.is_empty() {
                     "No friendship recommendations found. You might want to have more conversations first to build your profile!".to_string()
@@ -353,7 +339,6 @@ async fn handle_friendship_tool_calls(
                     formatted
                 };
                 
-                ic_cdk::println!("DEBUG: Tool result: {}", result);
                 
                 tool_results.push(ChatMessage::Tool {
                     content: result,
@@ -361,7 +346,6 @@ async fn handle_friendship_tool_calls(
                 });
             }
             _ => {
-                ic_cdk::println!("DEBUG: Unknown tool call: {}", tool_call.function.name);
                 // Handle unknown tool calls
                 tool_results.push(ChatMessage::Tool {
                     content: "Unknown tool call".to_string(),
@@ -372,7 +356,6 @@ async fn handle_friendship_tool_calls(
     }
     
     // Send follow-up request with tool results
-    ic_cdk::println!("DEBUG: Preparing follow-up request with {} tool results", tool_results.len());
     let base_prompt = get_system_prompt_for_room(channel_id);
     let mut follow_up_messages = vec![
         ChatMessage::System { content: base_prompt },
@@ -380,14 +363,12 @@ async fn handle_friendship_tool_calls(
     ];
     follow_up_messages.extend(tool_results);
 
-    ic_cdk::println!("DEBUG: Sending follow-up chat with {} total messages", follow_up_messages.len());
     
     let follow_up_response = ic_llm::chat(MODEL)
         .with_messages(follow_up_messages)
         .send()
         .await;
 
-    ic_cdk::println!("DEBUG: Follow-up response received");
     
     follow_up_response.message.content.unwrap_or_default()
 }

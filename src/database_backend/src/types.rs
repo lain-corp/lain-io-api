@@ -144,6 +144,41 @@ impl Storable for BlockedUser {
     const BOUND: Bound = Bound::Unbounded;
 }
 
+// Direct Message for P2P chat between friends
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct DirectMessage {
+    pub id: String,
+    pub text: String,
+    pub sender_principal: Principal,
+    pub timestamp: u64,
+    pub dm_channel_id: String,
+}
+
+// Wrapper for storing DM messages in stable storage
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug, Default)]
+pub struct DmMessages {
+    pub messages: Vec<DirectMessage>,
+}
+
+impl Storable for DmMessages {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(Encode!(self).unwrap())
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        Decode!(bytes.as_ref(), Self).unwrap()
+    }
+
+    const BOUND: Bound = Bound::Unbounded;
+}
+
+// Response for get_dm_messages with pagination info
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct DmMessagesResponse {
+    pub messages: Vec<DirectMessage>,
+    pub has_more: bool,
+}
+
 // Response types for API
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct ApiResponse<T> {

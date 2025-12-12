@@ -3,7 +3,7 @@ use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemor
 use ic_stable_structures::{DefaultMemoryImpl, StableBTreeMap};
 use std::cell::RefCell;
 
-use crate::types::{BlockedUser, Friend, FriendRequest, UserProfile, UserDataSync};
+use crate::types::{BlockedUser, Friend, FriendRequest, UserProfile, UserDataSync, DmMessages};
 
 type Memory = VirtualMemory<DefaultMemoryImpl>;
 
@@ -13,6 +13,7 @@ const FRIENDS_MEM_ID: MemoryId = MemoryId::new(1);
 const FRIEND_REQUESTS_MEM_ID: MemoryId = MemoryId::new(2);
 const BLOCKED_USERS_MEM_ID: MemoryId = MemoryId::new(3);
 const USER_DATA_SYNC_MEM_ID: MemoryId = MemoryId::new(4);
+const DM_MESSAGES_MEM_ID: MemoryId = MemoryId::new(5);
 
 thread_local! {
     static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
@@ -50,6 +51,13 @@ thread_local! {
     pub static USER_DATA_SYNC: RefCell<StableBTreeMap<Principal, UserDataSync, Memory>> = RefCell::new(
         StableBTreeMap::init(
             MEMORY_MANAGER.with(|m| m.borrow().get(USER_DATA_SYNC_MEM_ID)),
+        )
+    );
+
+    // Direct messages: dm_channel_id -> DmMessages (Vec<DirectMessage>)
+    pub static DM_MESSAGES: RefCell<StableBTreeMap<String, DmMessages, Memory>> = RefCell::new(
+        StableBTreeMap::init(
+            MEMORY_MANAGER.with(|m| m.borrow().get(DM_MESSAGES_MEM_ID)),
         )
     );
 }
