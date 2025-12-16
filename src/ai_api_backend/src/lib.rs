@@ -47,7 +47,7 @@ pub struct HttpResponse {
     pub body: Vec<u8>,
 }
 
-const MODEL: Model = Model::Llama3_8B;
+const MODEL: Model = Model::Llama3_1_8B;
 
 #[ic_cdk::update]
 async fn chat(messages: Vec<ChatMessage>, room_id: Option<String>) -> String {
@@ -134,6 +134,67 @@ async fn chat_with_rag(
     response.message.content.unwrap_or_default()
 }
 
+// Enhanced chat with unified knowledge base
+#[ic_cdk::update]
+async fn chat_with_knowledge(
+    messages: Vec<ChatMessage>,
+    room_id: Option<String>,
+    query_embedding: Vec<f32>,
+    knowledge_categories: Option<Vec<String>>
+) -> String {
+    let channel_id = room_id.as_ref().map(|s| s.as_str()).unwrap_or("#general");
+    let caller = ic_cdk::caller();
+    let user_id = caller.to_text();
+    
+    // Search unified knowledge base for relevant context
+    let knowledge_results = personality::search_unified_knowledge(
+        &query_embedding, 
+        knowledge_categories, 
+        8  // Get more comprehensive context
+    );
+    
+    // Separate personality and wiki context
+    let mut personality_context = Vec::new();
+    let mut wiki_context = Vec::new();
+    
+    for result in knowledge_results {
+        if result.category.starts_with("wiki_") {
+            wiki_context.push(format!("[{}] {}", result.source_info, result.text));
+        } else {
+            personality_context.push(result.text);
+        }
+    }
+    
+    // Get user conversation context
+    let user_conversation_context = search_conversation_history(&user_id, channel_id, &query_embedding, 2);
+    
+    // Build enhanced system prompt with all contexts
+    let base_prompt = get_system_prompt_for_room(channel_id);
+    let mut enhanced_prompt = base_prompt;
+    
+    if !personality_context.is_empty() {
+        enhanced_prompt.push_str(&format!("\n\nPersonality Context: {}", personality_context.join(" ")));
+    }
+    
+    if !wiki_context.is_empty() {
+        enhanced_prompt.push_str(&format!("\n\nKnowledge Base: {}", wiki_context.join(" ")));
+    }
+    
+    if !user_conversation_context.is_empty() {
+        enhanced_prompt.push_str(&format!("\n\nUser History: {}", user_conversation_context.join(" ")));
+    }
+    
+    let mut all_messages = vec![ChatMessage::System {
+        content: enhanced_prompt,
+    }];
+    all_messages.extend(messages);
+    
+    let chat = ic_llm::chat(MODEL).with_messages(all_messages);
+    let response = chat.send().await;
+    
+    response.message.content.unwrap_or_default()
+}
+
 #[ic_cdk::query]
 fn get_available_rooms() -> Vec<RoomConfig> {
     get_all_room_configs()
@@ -175,6 +236,36 @@ fn get_personality_embeddings() -> Vec<PersonalityEmbedding> {
 #[ic_cdk::query]
 fn search_personality(channel_id: String, query_embedding: Vec<f32>) -> Vec<String> {
     search_personality_context(&channel_id, &query_embedding, 5)
+}
+
+// === UNIFIED KNOWLEDGE SEARCH ===
+
+#[ic_cdk::query]
+fn search_unified_knowledge(
+    query_embedding: Vec<f32>,
+    categories: Option<Vec<String>>,
+    limit: Option<u32>
+) -> Vec<personality::SearchResult> {
+    personality::search_unified_knowledge(&query_embedding, categories, limit.unwrap_or(10) as usize)
+}
+
+#[ic_cdk::query]
+fn search_wiki_content(
+    query_embedding: Vec<f32>,
+    content_type: Option<String>,
+    limit: Option<u32>
+) -> Vec<personality::SearchResult> {
+    personality::search_wiki_content(&query_embedding, content_type, limit.unwrap_or(5) as usize)
+}
+
+#[ic_cdk::query]
+fn get_knowledge_categories() -> Vec<personality::CategoryInfo> {
+    personality::get_knowledge_categories()
+}
+
+#[ic_cdk::query]
+fn get_knowledge_stats() -> personality::KnowledgeStats {
+    personality::get_knowledge_stats()
 }
 
 // === CONVERSATION EMBEDDING ENDPOINTS ===
@@ -302,16 +393,16 @@ async fn chat_with_user_context(
 
 /// Handle friendship tool calls and generate follow-up response
 async fn handle_friendship_tool_calls(
-    initial_response: ic_llm::Response,
+    response: ic_llm::Response,
     user_id: &str,
     channel_id: &str,
-    personality_context: &[String],
-    user_conversation_context: &[String]
+    _personality_context: &[String],
+    _user_conversation_context: &[String]
 ) -> String {
     let mut tool_results = Vec::new();
     
     // Process each tool call
-    for tool_call in &initial_response.message.tool_calls {
+    for tool_call in &response.message.tool_calls {
         match tool_call.function.name.as_str() {
             "get_friendship_recommendations" => {
                 
@@ -359,7 +450,7 @@ async fn handle_friendship_tool_calls(
     let base_prompt = get_system_prompt_for_room(channel_id);
     let mut follow_up_messages = vec![
         ChatMessage::System { content: base_prompt },
-        ChatMessage::Assistant(initial_response.message.clone()),
+        ChatMessage::Assistant(response.message.clone()),
     ];
     follow_up_messages.extend(tool_results);
 

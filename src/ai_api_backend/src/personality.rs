@@ -64,6 +64,32 @@ pub struct UserProfile {
     pub updated_at: u64,
 }
 
+// New structures for unified knowledge search
+#[derive(CandidType, Deserialize, Debug, Clone)]
+pub struct SearchResult {
+    pub text: String,
+    pub similarity: f32,
+    pub category: String,
+    pub importance: f32,
+    pub source_info: String,  // For wiki: file name, for personality: channel
+    pub content_type: String, // For wiki: section type, for personality: trait type
+}
+
+#[derive(CandidType, Deserialize, Debug, Clone)]
+pub struct CategoryInfo {
+    pub category: String,
+    pub count: u32,
+    pub description: String,
+}
+
+#[derive(CandidType, Deserialize, Debug, Clone)]
+pub struct KnowledgeStats {
+    pub total_embeddings: u32,
+    pub personality_embeddings: u32,
+    pub wiki_embeddings: u32,
+    pub categories: Vec<CategoryInfo>,
+}
+
 // Storage for personality embeddings (stable memory)
 thread_local! {
     static PERSONALITY_EMBEDDINGS: std::cell::RefCell<Vec<PersonalityEmbedding>> = std::cell::RefCell::new(Vec::new());
@@ -572,4 +598,159 @@ pub fn get_user_profile(user_id: &str) -> Option<UserProfile> {
 /// Get all user profiles
 pub fn get_all_profiles() -> Vec<UserProfile> {
     USER_PROFILES.with(|profiles| profiles.borrow().clone())
+}
+
+// === UNIFIED KNOWLEDGE SEARCH FUNCTIONS ===
+
+/// Search across both personality and wiki embeddings with unified ranking
+pub fn search_unified_knowledge(
+    query_embedding: &[f32], 
+    categories: Option<Vec<String>>, 
+    limit: usize
+) -> Vec<SearchResult> {
+    let mut all_results = Vec::new();
+    
+    PERSONALITY_EMBEDDINGS.with(|embeddings| {
+        let borrowed_embeddings = embeddings.borrow();
+        
+        for embedding in borrowed_embeddings.iter() {
+            // Filter by categories if specified
+            if let Some(ref cats) = categories {
+                if !cats.contains(&embedding.category) && !cats.iter().any(|cat| embedding.category.starts_with(cat)) {
+                    continue;
+                }
+            }
+            
+            let similarity = cosine_similarity(query_embedding, &embedding.embedding);
+            let source_info = if embedding.channel_id == "#wiki" {
+                // Extract source file from the text or use a default
+                if let Some(start) = embedding.text.find('[') {
+                    if let Some(end) = embedding.text.find(']') {
+                        embedding.text[start+1..end].to_string()
+                    } else {
+                        "wiki".to_string()
+                    }
+                } else {
+                    embedding.channel_id.clone()
+                }
+            } else {
+                embedding.channel_id.clone()
+            };
+            
+            // Determine content type based on embedding fields
+            let content_type = if embedding.channel_id == "#wiki" {
+                // Try to extract content type from category
+                if embedding.category.starts_with("wiki_") {
+                    embedding.category[5..].to_string()
+                } else {
+                    "documentation".to_string()
+                }
+            } else {
+                embedding.category.clone()
+            };
+            
+            all_results.push(SearchResult {
+                text: embedding.text.clone(),
+                similarity,
+                category: embedding.category.clone(),
+                importance: embedding.importance,
+                source_info,
+                content_type,
+            });
+        }
+    });
+    
+    // Sort by combined score: similarity * importance
+    all_results.sort_by(|a, b| {
+        let score_a = a.similarity * a.importance;
+        let score_b = b.similarity * b.importance;
+        score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    
+    all_results.into_iter().take(limit).collect()
+}
+
+/// Search specifically for wiki content with optional filtering
+pub fn search_wiki_content(
+    query_embedding: &[f32], 
+    content_type: Option<String>, 
+    limit: usize
+) -> Vec<SearchResult> {
+    let wiki_categories: Vec<String> = if let Some(ct) = content_type {
+        vec![format!("wiki_{}", ct)]
+    } else {
+        vec!["wiki_".to_string()]
+    };
+    
+    search_unified_knowledge(query_embedding, Some(wiki_categories), limit)
+}
+
+/// Get available knowledge categories with counts
+pub fn get_knowledge_categories() -> Vec<CategoryInfo> {
+    let mut category_counts: HashMap<String, u32> = HashMap::new();
+    
+    PERSONALITY_EMBEDDINGS.with(|embeddings| {
+        let borrowed_embeddings = embeddings.borrow();
+        
+        for embedding in borrowed_embeddings.iter() {
+            *category_counts.entry(embedding.category.clone()).or_insert(0) += 1;
+        }
+    });
+    
+    let mut categories = Vec::new();
+    for (category, count) in category_counts {
+        let description = if category.starts_with("wiki_") {
+            match category.as_str() {
+                "wiki_project-docs" => "Documentation for specific LainCorp projects",
+                "wiki_tech-guides" => "Technical guides and development documentation", 
+                "wiki_meta-docs" => "Meta documentation and contribution guides",
+                _ => "Wiki documentation content"
+            }
+        } else {
+            match category.as_str() {
+                "core_belief" => "Fundamental worldview and philosophical beliefs",
+                "communication_style" => "Preferred ways of interacting and communicating",
+                "technical_preference" => "Technology opinions and technical choices",
+                "social_trait" => "Social behavior patterns and characteristics",
+                "work_habit" => "Development practices and work behaviors",
+                "artistic_taste" => "Creative preferences and aesthetic opinions",
+                "music_preference" => "Musical tastes and audio preferences",
+                _ => "Personality trait or preference"
+            }
+        }.to_string();
+        
+        categories.push(CategoryInfo {
+            category,
+            count,
+            description,
+        });
+    }
+    
+    // Sort by count (descending)
+    categories.sort_by(|a, b| b.count.cmp(&a.count));
+    categories
+}
+
+/// Get overall knowledge base statistics
+pub fn get_knowledge_stats() -> KnowledgeStats {
+    let categories = get_knowledge_categories();
+    let mut total_embeddings = 0;
+    let mut personality_embeddings = 0;
+    let mut wiki_embeddings = 0;
+    
+    for category in &categories {
+        total_embeddings += category.count;
+        if category.category.starts_with("wiki_") {
+            wiki_embeddings += category.count;
+        } else {
+            personality_embeddings += category.count;
+        }
+    }
+    
+    KnowledgeStats {
+        total_embeddings,
+        personality_embeddings,
+        wiki_embeddings,
+        categories,
+    }
 }

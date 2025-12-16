@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """
 Lain Personality Embedding Generator
-Generates embeddings for Lain's personality traits and uploads them to IC canister
+Generates embeddings for Lain's personality traits and memex-wiki documentation
+Uploads embeddings to IC canister for unified knowledge retrieval
 """
 
 from sentence_transformers import SentenceTransformer
 import json
 import subprocess
 import time
-from typing import List, Dict
+import os
+import re
+from pathlib import Path
+from typing import List, Dict, Tuple, Optional
 
 # Load a good embedding model (you can use different ones)
 model = SentenceTransformer('all-MiniLM-L6-v2')  # 384 dimensions
@@ -167,6 +171,265 @@ LAIN_PERSONALITY = {
     ]
 }
 
+# Memex-wiki content categorization patterns
+WIKI_CATEGORIZATION = {
+    "project-docs": {
+        "patterns": [
+            r"projects/.*\.md$",
+            r"projects/README\.md$"
+        ],
+        "description": "Documentation for specific LainCorp projects"
+    },
+    "tech-guides": {
+        "patterns": [
+            r"icp-overview\.md$",
+            r"development\.md$",
+            r"architecture\.md$",
+            r"deployment\.md$",
+            r"best-practices\.md$"
+        ],
+        "description": "Technical guides and development documentation"
+    },
+    "meta-docs": {
+        "patterns": [
+            r"README\.md$",
+            r"contributing\.md$",
+            r"glossary\.md$",
+            r"faq\.md$",
+            r"resources\.md$"
+        ],
+        "description": "Meta documentation about the wiki and contribution guides"
+    }
+}
+
+def parse_markdown_file(file_path: str) -> Dict[str, str]:
+    """Parse markdown file and extract metadata and content sections"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Extract metadata from the beginning of the file
+        metadata = {}
+        content_sections = {}
+        
+        # Look for structured metadata (Status, Type, URL, etc.)
+        metadata_patterns = {
+            'status': r'\*\*Status\*\*:\s*(.+)',
+            'type': r'\*\*Type\*\*:\s*(.+)',
+            'url': r'\*\*URL\*\*:\s*(.+)',
+            'platform': r'\*\*Platform\*\*:\s*(.+)'
+        }
+        
+        for key, pattern in metadata_patterns.items():
+            match = re.search(pattern, content)
+            if match:
+                metadata[key] = match.group(1).strip()
+        
+        # Extract title (first # heading)
+        title_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+        if title_match:
+            metadata['title'] = title_match.group(1).strip()
+        
+        # Split content by major sections (## headings)
+        sections = re.split(r'\n##\s+(.+)\n', content)
+        
+        # First section is before any ## heading (overview/intro)
+        if sections[0].strip():
+            content_sections['overview'] = sections[0].strip()
+        
+        # Process subsequent sections
+        for i in range(1, len(sections), 2):
+            if i + 1 < len(sections):
+                section_title = sections[i].strip().lower().replace(' ', '_')
+                section_content = sections[i + 1].strip()
+                content_sections[section_title] = section_content
+        
+        return {
+            'metadata': metadata,
+            'sections': content_sections,
+            'full_content': content
+        }
+    
+    except Exception as e:
+        print(f"Error parsing {file_path}: {e}")
+        return {}
+
+def categorize_wiki_content(file_path: str) -> str:
+    """Categorize wiki content based on file path patterns"""
+    relative_path = os.path.relpath(file_path, start="/Users/laincorp/LainCorp/memex-wiki/docs")
+    
+    for category, config in WIKI_CATEGORIZATION.items():
+        for pattern in config["patterns"]:
+            if re.search(pattern, relative_path):
+                return category
+    
+    return "general-docs"
+
+def extract_meaningful_content(content: str, max_chars: int = 1000) -> List[str]:
+    """Extract meaningful chunks from content for embedding"""
+    # Remove markdown formatting for cleaner embeddings
+    cleaned = re.sub(r'```[\s\S]*?```', '', content)  # Remove code blocks
+    cleaned = re.sub(r'`[^`]+`', '', cleaned)  # Remove inline code
+    cleaned = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', cleaned)  # Convert links to text
+    cleaned = re.sub(r'[#*_`]', '', cleaned)  # Remove markdown formatting
+    cleaned = re.sub(r'\n+', ' ', cleaned)  # Replace newlines with spaces
+    cleaned = ' '.join(cleaned.split())  # Normalize whitespace
+    
+    # Split into meaningful chunks
+    chunks = []
+    
+    if len(cleaned) <= max_chars:
+        chunks.append(cleaned)
+    else:
+        # Split by sentences, trying to keep chunks under max_chars
+        sentences = re.split(r'[.!?]+', cleaned)
+        current_chunk = ""
+        
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+                
+            if len(current_chunk) + len(sentence) <= max_chars:
+                current_chunk += sentence + ". "
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                current_chunk = sentence + ". "
+        
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+    
+    return [chunk for chunk in chunks if len(chunk.strip()) > 50]  # Filter out very short chunks
+
+def process_wiki_file(file_path: str) -> List[Dict]:
+    """Process a single wiki markdown file into embedding records"""
+    parsed = parse_markdown_file(file_path)
+    if not parsed:
+        return []
+    
+    category = categorize_wiki_content(file_path)
+    file_name = os.path.basename(file_path)
+    embeddings = []
+    
+    # Create embedding for overall file summary
+    title = parsed['metadata'].get('title', file_name.replace('.md', ''))
+    overview_text = ""
+    
+    if 'overview' in parsed['sections']:
+        overview_text = parsed['sections']['overview']
+    elif parsed['sections']:
+        # Use first section if no overview
+        first_section = list(parsed['sections'].values())[0]
+        overview_text = first_section[:500] + "..." if len(first_section) > 500 else first_section
+    
+    if overview_text:
+        # Create a comprehensive summary embedding
+        summary_text = f"{title}: {overview_text}"
+        content_chunks = extract_meaningful_content(summary_text, max_chars=800)
+        
+        for chunk in content_chunks:
+            embedding_record = {
+                "text": chunk,
+                "category": f"wiki_{category}",
+                "importance": 0.9,  # Wiki content is generally important
+                "source_file": file_name,
+                "content_type": "summary",
+                "metadata": parsed['metadata']
+            }
+            embeddings.append(embedding_record)
+    
+    # Create embeddings for major sections
+    important_sections = ['features', 'architecture', 'core_mission', 'key_concepts', 
+                         'overview', 'getting_started', 'installation', 'usage']
+    
+    for section_name, section_content in parsed['sections'].items():
+        if not section_content or len(section_content) < 100:
+            continue
+        
+        # Determine importance based on section type
+        importance = 0.8 if section_name.lower() in important_sections else 0.6
+        
+        content_chunks = extract_meaningful_content(section_content, max_chars=900)
+        
+        for chunk in content_chunks:
+            embedding_record = {
+                "text": f"{title} - {section_name.replace('_', ' ').title()}: {chunk}",
+                "category": f"wiki_{category}",
+                "importance": importance,
+                "source_file": file_name,
+                "content_type": f"section_{section_name}",
+                "metadata": parsed['metadata']
+            }
+            embeddings.append(embedding_record)
+    
+    return embeddings
+
+def process_memex_wiki(wiki_path: str = "/Users/laincorp/LainCorp/memex-wiki/docs") -> List[Dict]:
+    """Process all markdown files in memex-wiki and generate embeddings"""
+    print(f"🔍 Processing memex-wiki content from {wiki_path}...")
+    
+    if not os.path.exists(wiki_path):
+        print(f"❌ Wiki path not found: {wiki_path}")
+        return []
+    
+    all_embeddings = []
+    markdown_files = []
+    
+    # Find all markdown files recursively
+    for root, dirs, files in os.walk(wiki_path):
+        for file in files:
+            if file.endswith('.md') and not file.startswith('.'):
+                full_path = os.path.join(root, file)
+                markdown_files.append(full_path)
+    
+    print(f"📚 Found {len(markdown_files)} markdown files")
+    
+    for file_path in markdown_files:
+        try:
+            print(f"📄 Processing {os.path.basename(file_path)}...")
+            file_embeddings = process_wiki_file(file_path)
+            all_embeddings.extend(file_embeddings)
+            print(f"  ✓ Generated {len(file_embeddings)} embeddings")
+        except Exception as e:
+            print(f"  ❌ Error processing {file_path}: {e}")
+    
+    print(f"📊 Generated {len(all_embeddings)} total wiki embeddings")
+    return all_embeddings
+
+def generate_wiki_embeddings(wiki_embeddings: List[Dict]) -> List[Dict]:
+    """Generate embeddings for wiki content using the sentence transformer model"""
+    print("🧠 Generating embeddings for wiki content...")
+    
+    processed_embeddings = []
+    
+    for i, item in enumerate(wiki_embeddings, 1):
+        try:
+            # Generate embedding vector
+            embedding_vector = model.encode(item["text"]).tolist()
+            
+            # Create the structure expected by the canister
+            embedding_record = {
+                "text": item["text"],
+                "embedding": embedding_vector,
+                "channel_id": "#wiki",  # Special channel for wiki content
+                "category": item["category"],
+                "importance": item["importance"],
+                "created_at": int(time.time()),
+                "source_file": item.get("source_file", "unknown"),
+                "content_type": item.get("content_type", "general")
+            }
+            
+            processed_embeddings.append(embedding_record)
+            
+            if i % 10 == 0:
+                print(f"  📈 Processed {i}/{len(wiki_embeddings)} wiki embeddings...")
+                
+        except Exception as e:
+            print(f"  ❌ Error generating embedding for item {i}: {e}")
+    
+    return processed_embeddings
+
 def generate_embeddings_for_channel(channel_id: str, personality_data: List[Dict]) -> List[Dict]:
     """Generate embeddings for a specific channel's personality data"""
     embeddings = []
@@ -278,39 +541,74 @@ def upload_single_embedding(embedding: Dict, canister_name: str = "ai_api_backen
         return False
 
 def main():
-    print("🧠 Generating Lain's personality embeddings...")
+    print("🧠 Generating Lain's personality and memex-wiki embeddings...")
     
     all_embeddings = []
     
-    # Generate embeddings for each channel
+    # Generate personality embeddings for each channel
+    print("\n📡 Processing personality data...")
     for channel_id, personality_data in LAIN_PERSONALITY.items():
-        print(f"\n📡 Processing {channel_id}...")
+        print(f"  Processing {channel_id}...")
         channel_embeddings = generate_embeddings_for_channel(channel_id, personality_data)
         all_embeddings.extend(channel_embeddings)
     
-    print(f"\n📊 Generated {len(all_embeddings)} total embeddings")
+    print(f"✓ Generated {len(all_embeddings)} personality embeddings")
+    
+    # Process memex-wiki content
+    print("\n📚 Processing memex-wiki content...")
+    wiki_content = process_memex_wiki()
+    if wiki_content:
+        wiki_embeddings = generate_wiki_embeddings(wiki_content)
+        all_embeddings.extend(wiki_embeddings)
+        print(f"✓ Generated {len(wiki_embeddings)} wiki embeddings")
+    else:
+        print("⚠️  No wiki content processed")
+    
+    print(f"\n📊 Total embeddings generated: {len(all_embeddings)}")
+    
+    # Categorize embeddings for summary
+    categories = {}
+    for emb in all_embeddings:
+        cat = emb['category']
+        categories[cat] = categories.get(cat, 0) + 1
+    
+    print("\n📈 Embedding breakdown by category:")
+    for category, count in sorted(categories.items()):
+        print(f"  {category}: {count}")
     
     # Option to save to file first (for backup/inspection)
-    with open("lain_personality_embeddings.json", "w") as f:
+    output_file = "lain_personality_embeddings.json"
+    with open(output_file, "w") as f:
         json.dump(all_embeddings, f, indent=2)
-    print("💾 Saved embeddings to lain_personality_embeddings.json")
+    print(f"\n💾 Saved embeddings to {output_file}")
     
-    # Upload to canister individually (batch seems to have issues)
-    print("\n🚀 Uploading to IC canister individually...")
-    successful_uploads = 0
-    
-    for i, embedding in enumerate(all_embeddings, 1):
-        print(f"📤 Uploading {i}/{len(all_embeddings)}: {embedding['text'][:50]}...")
-        if upload_single_embedding(embedding):
-            successful_uploads += 1
+    # Upload to canister
+    upload_choice = input("\n🚀 Upload to IC canister? (y/n): ").lower().strip()
+    if upload_choice in ['y', 'yes']:
+        print("\n🚀 Uploading to IC canister individually...")
+        successful_uploads = 0
+        
+        for i, embedding in enumerate(all_embeddings, 1):
+            source_info = ""
+            if 'source_file' in embedding:
+                source_info = f" [{embedding['source_file']}]"
+            
+            print(f"📤 Uploading {i}/{len(all_embeddings)}: {embedding['text'][:50]}...{source_info}")
+            
+            if upload_single_embedding(embedding):
+                successful_uploads += 1
+            else:
+                print(f"❌ Failed to upload embedding {i}")
+                retry = input("Continue with remaining uploads? (y/n): ").lower().strip()
+                if retry not in ['y', 'yes']:
+                    break
+        
+        if successful_uploads == len(all_embeddings):
+            print(f"🎉 Successfully uploaded all {successful_uploads} embeddings!")
         else:
-            print(f"❌ Failed to upload embedding {i}")
-            break
-    
-    if successful_uploads == len(all_embeddings):
-        print(f"🎉 Successfully uploaded all {successful_uploads} personality embeddings!")
+            print(f"⚠️  Uploaded {successful_uploads}/{len(all_embeddings)} embeddings.")
     else:
-        print(f"⚠️  Uploaded {successful_uploads}/{len(all_embeddings)} embeddings before failure.")
+        print("📁 Embeddings saved locally only. Run again to upload to canister.")
 
 if __name__ == "__main__":
     main()
