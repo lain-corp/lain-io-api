@@ -754,3 +754,95 @@ pub fn get_knowledge_stats() -> KnowledgeStats {
         categories,
     }
 }
+
+// === TEXT-BASED SEARCH (No embedding required) ===
+
+/// Search knowledge base using text keywords (no embedding required)
+/// Uses TF-IDF-like scoring based on keyword matches
+pub fn search_knowledge_by_text(
+    query: &str,
+    categories: Option<Vec<String>>,
+    limit: usize
+) -> Vec<SearchResult> {
+    let query_lower = query.to_lowercase();
+    let query_words: Vec<&str> = query_lower
+        .split_whitespace()
+        .filter(|w| w.len() > 2) // Skip very short words
+        .collect();
+    
+    if query_words.is_empty() {
+        return Vec::new();
+    }
+    
+    let mut results = Vec::new();
+    
+    PERSONALITY_EMBEDDINGS.with(|embeddings| {
+        let borrowed_embeddings = embeddings.borrow();
+        
+        for embedding in borrowed_embeddings.iter() {
+            // Filter by categories if specified
+            if let Some(ref cats) = categories {
+                if !cats.iter().any(|cat| embedding.category.starts_with(cat) || embedding.category == *cat) {
+                    continue;
+                }
+            }
+            
+            let text_lower = embedding.text.to_lowercase();
+            
+            // Count keyword matches and calculate score
+            let mut match_count = 0;
+            let mut exact_phrase_bonus = 0.0;
+            
+            for word in &query_words {
+                if text_lower.contains(word) {
+                    match_count += 1;
+                }
+            }
+            
+            // Bonus for exact phrase match
+            if text_lower.contains(&query_lower) {
+                exact_phrase_bonus = 0.5;
+            }
+            
+            if match_count > 0 {
+                // Score: ratio of matched words + phrase bonus + importance weight
+                let base_score = (match_count as f32 / query_words.len() as f32) + exact_phrase_bonus;
+                let weighted_score = base_score * embedding.importance;
+                
+                let source_info = if embedding.channel_id == "#wiki" {
+                    if let Some(start) = embedding.text.find('[') {
+                        if let Some(end) = embedding.text.find(']') {
+                            embedding.text[start+1..end].to_string()
+                        } else {
+                            "wiki".to_string()
+                        }
+                    } else {
+                        embedding.channel_id.clone()
+                    }
+                } else {
+                    embedding.channel_id.clone()
+                };
+                
+                let content_type = if embedding.category.starts_with("wiki_") {
+                    embedding.category[5..].to_string()
+                } else {
+                    embedding.category.clone()
+                };
+                
+                results.push(SearchResult {
+                    text: embedding.text.clone(),
+                    similarity: weighted_score,
+                    category: embedding.category.clone(),
+                    importance: embedding.importance,
+                    source_info,
+                    content_type,
+                });
+            }
+        }
+    });
+    
+    // Sort by score (descending)
+    results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+    
+    results.into_iter().take(limit).collect()
+}

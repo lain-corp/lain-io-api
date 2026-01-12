@@ -71,16 +71,52 @@ type user_profile = record {
   updated_at: nat64;
 };
 
+// Search result type for unified knowledge search
+type search_result = record {
+  text: text;
+  similarity: float32;
+  category: text;
+  importance: float32;
+  source_info: text;
+  content_type: text;
+};
+
+// Category info for knowledge base
+type category_info = record {
+  category: text;
+  count: nat32;
+  description: text;
+};
+
+// Knowledge base statistics
+type knowledge_stats = record {
+  total_embeddings: nat32;
+  personality_embeddings: nat32;
+  wiki_embeddings: nat32;
+  categories: vec category_info;
+};
+
 service: {
   chat: (vec chat_message, opt text) -> (text);
   chat_default: (vec chat_message) -> (text);
   chat_with_rag: (vec chat_message, opt text, vec float32) -> (text);
   chat_with_user_context: (vec chat_message, text, opt text, vec float32) -> (text);
+  chat_with_knowledge: (vec chat_message, opt text, vec float32, opt vec text) -> (text);
   get_available_rooms: () -> (vec room_config) query;
   store_personality: (personality_embedding) -> (text);
   store_personality_batch: (vec personality_embedding) -> (text);
   get_personality_embeddings: () -> (vec personality_embedding) query;
   search_personality: (text, vec float32) -> (vec text) query;
+  
+  // Unified Knowledge Search API (searches across all personality + wiki embeddings)
+  search_unified_knowledge: (vec float32, opt vec text, opt nat32) -> (vec search_result) query;
+  search_wiki_content: (vec float32, opt text, opt nat32) -> (vec search_result) query;
+  get_knowledge_categories: () -> (vec category_info) query;
+  get_knowledge_stats: () -> (knowledge_stats) query;
+  
+  // Text-based search (NO EMBEDDING REQUIRED - uses keyword matching)
+  search_knowledge_by_text: (text, opt vec text, opt nat32) -> (vec search_result) query;
+  
   store_conversation_chunk: (conversation_embedding) -> (text);
   get_user_conversations: (text, text) -> (vec conversation_embedding) query;
   get_next_conversation_chunk_index: (text, text) -> (nat32) query;

@@ -268,6 +268,17 @@ fn get_knowledge_stats() -> personality::KnowledgeStats {
     personality::get_knowledge_stats()
 }
 
+/// Text-based knowledge search (no embedding required!)
+/// Searches using keyword matching - perfect for client-side queries
+#[ic_cdk::query]
+fn search_knowledge_by_text(
+    query: String,
+    categories: Option<Vec<String>>,
+    limit: Option<u32>
+) -> Vec<personality::SearchResult> {
+    personality::search_knowledge_by_text(&query, categories, limit.unwrap_or(10) as usize)
+}
+
 // === CONVERSATION EMBEDDING ENDPOINTS ===
 
 #[ic_cdk::update]

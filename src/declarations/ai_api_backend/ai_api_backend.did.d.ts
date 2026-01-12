@@ -9,6 +9,14 @@ export interface big_five_traits {
   'extraversion' : number,
   'openness' : number,
 }
+/**
+ * Category info for knowledge base
+ */
+export interface category_info {
+  'count' : number,
+  'description' : string,
+  'category' : string,
+}
 export type chat_message = {
     'tool' : { 'content' : string, 'tool_call_id' : string }
   } |
@@ -38,6 +46,15 @@ export interface conversation_embedding {
   'message_count' : number,
   'embedding' : Array<number>,
 }
+/**
+ * Knowledge base statistics
+ */
+export interface knowledge_stats {
+  'categories' : Array<category_info>,
+  'personality_embeddings' : number,
+  'wiki_embeddings' : number,
+  'total_embeddings' : number,
+}
 export interface personality_embedding {
   'channel_id' : string,
   'text' : string,
@@ -50,6 +67,17 @@ export interface room_config {
   'id' : string,
   'name' : string,
   'description' : string,
+}
+/**
+ * Search result type for unified knowledge search
+ */
+export interface search_result {
+  'text' : string,
+  'content_type' : string,
+  'importance' : number,
+  'source_info' : string,
+  'similarity' : number,
+  'category' : string,
 }
 export interface topic_interest {
   'expertise_level' : number,
@@ -75,6 +103,10 @@ export interface _SERVICE {
   'calculate_user_similarity' : ActorMethod<[string, string], [] | [number]>,
   'chat' : ActorMethod<[Array<chat_message>, [] | [string]], string>,
   'chat_default' : ActorMethod<[Array<chat_message>], string>,
+  'chat_with_knowledge' : ActorMethod<
+    [Array<chat_message>, [] | [string], Array<number>, [] | [Array<string>]],
+    string
+  >,
   'chat_with_rag' : ActorMethod<
     [Array<chat_message>, [] | [string], Array<number>],
     string
@@ -90,6 +122,8 @@ export interface _SERVICE {
     [string, [] | [number]],
     Array<[string, number]>
   >,
+  'get_knowledge_categories' : ActorMethod<[], Array<category_info>>,
+  'get_knowledge_stats' : ActorMethod<[], knowledge_stats>,
   'get_next_conversation_chunk_index' : ActorMethod<[string, string], number>,
   'get_personality_embeddings' : ActorMethod<[], Array<personality_embedding>>,
   'get_recent_user_conversations' : ActorMethod<
@@ -104,11 +138,32 @@ export interface _SERVICE {
     [string, string],
     Array<conversation_embedding>
   >,
+  /**
+   * User Profiling API
+   */
   'get_user_profile_by_id' : ActorMethod<[string], [] | [user_profile]>,
+  /**
+   * Text-based search (NO EMBEDDING REQUIRED - uses keyword matching)
+   */
+  'search_knowledge_by_text' : ActorMethod<
+    [string, [] | [Array<string>], [] | [number]],
+    Array<search_result>
+  >,
   'search_personality' : ActorMethod<[string, Array<number>], Array<string>>,
+  /**
+   * Unified Knowledge Search API (searches across all personality + wiki embeddings)
+   */
+  'search_unified_knowledge' : ActorMethod<
+    [Array<number>, [] | [Array<string>], [] | [number]],
+    Array<search_result>
+  >,
   'search_user_conversation_history' : ActorMethod<
     [string, string, Array<number>, [] | [number]],
     Array<string>
+  >,
+  'search_wiki_content' : ActorMethod<
+    [Array<number>, [] | [string], [] | [number]],
+    Array<search_result>
   >,
   'store_conversation_chunk' : ActorMethod<[conversation_embedding], string>,
   'store_personality' : ActorMethod<[personality_embedding], string>,

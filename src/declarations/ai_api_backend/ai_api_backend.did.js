@@ -48,6 +48,17 @@ export const idlFactory = ({ IDL }) => {
     'name' : IDL.Text,
     'description' : IDL.Text,
   });
+  const category_info = IDL.Record({
+    'count' : IDL.Nat32,
+    'description' : IDL.Text,
+    'category' : IDL.Text,
+  });
+  const knowledge_stats = IDL.Record({
+    'categories' : IDL.Vec(category_info),
+    'personality_embeddings' : IDL.Nat32,
+    'wiki_embeddings' : IDL.Nat32,
+    'total_embeddings' : IDL.Nat32,
+  });
   const personality_embedding = IDL.Record({
     'channel_id' : IDL.Text,
     'text' : IDL.Text,
@@ -65,6 +76,14 @@ export const idlFactory = ({ IDL }) => {
     'summary' : IDL.Text,
     'message_count' : IDL.Nat32,
     'embedding' : IDL.Vec(IDL.Float32),
+  });
+  const search_result = IDL.Record({
+    'text' : IDL.Text,
+    'content_type' : IDL.Text,
+    'importance' : IDL.Float32,
+    'source_info' : IDL.Text,
+    'similarity' : IDL.Float32,
+    'category' : IDL.Text,
   });
   return IDL.Service({
     'analyze_user_interests' : IDL.Func(
@@ -88,6 +107,16 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'chat_default' : IDL.Func([IDL.Vec(chat_message)], [IDL.Text], []),
+    'chat_with_knowledge' : IDL.Func(
+        [
+          IDL.Vec(chat_message),
+          IDL.Opt(IDL.Text),
+          IDL.Vec(IDL.Float32),
+          IDL.Opt(IDL.Vec(IDL.Text)),
+        ],
+        [IDL.Text],
+        [],
+      ),
     'chat_with_rag' : IDL.Func(
         [IDL.Vec(chat_message), IDL.Opt(IDL.Text), IDL.Vec(IDL.Float32)],
         [IDL.Text],
@@ -111,6 +140,12 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Vec(IDL.Tuple(IDL.Text, IDL.Float32))],
         ['query'],
       ),
+    'get_knowledge_categories' : IDL.Func(
+        [],
+        [IDL.Vec(category_info)],
+        ['query'],
+      ),
+    'get_knowledge_stats' : IDL.Func([], [knowledge_stats], ['query']),
     'get_next_conversation_chunk_index' : IDL.Func(
         [IDL.Text, IDL.Text],
         [IDL.Nat32],
@@ -141,14 +176,29 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Opt(user_profile)],
         ['query'],
       ),
+    'search_knowledge_by_text' : IDL.Func(
+        [IDL.Text, IDL.Opt(IDL.Vec(IDL.Text)), IDL.Opt(IDL.Nat32)],
+        [IDL.Vec(search_result)],
+        ['query'],
+      ),
     'search_personality' : IDL.Func(
         [IDL.Text, IDL.Vec(IDL.Float32)],
         [IDL.Vec(IDL.Text)],
         ['query'],
       ),
+    'search_unified_knowledge' : IDL.Func(
+        [IDL.Vec(IDL.Float32), IDL.Opt(IDL.Vec(IDL.Text)), IDL.Opt(IDL.Nat32)],
+        [IDL.Vec(search_result)],
+        ['query'],
+      ),
     'search_user_conversation_history' : IDL.Func(
         [IDL.Text, IDL.Text, IDL.Vec(IDL.Float32), IDL.Opt(IDL.Nat32)],
         [IDL.Vec(IDL.Text)],
+        ['query'],
+      ),
+    'search_wiki_content' : IDL.Func(
+        [IDL.Vec(IDL.Float32), IDL.Opt(IDL.Text), IDL.Opt(IDL.Nat32)],
+        [IDL.Vec(search_result)],
         ['query'],
       ),
     'store_conversation_chunk' : IDL.Func(
